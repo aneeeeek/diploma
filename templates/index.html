@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Загрузка изображения и данных</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            min-height: 100vh;
+        }
+        .panel {
+            flex: 1;
+            padding: 20px;
+            border: 1px solid #ddd;
+            margin: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+        }
+        .panel h2 {
+            margin-top: 0;
+            text-align: center;
+            color: #333;
+        }
+        #imageUpload, #dataUpload {
+            display: none;
+        }
+        .upload-btn {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+            margin-bottom: 15px;
+            align-self: center;
+        }
+        .upload-btn:hover {
+            background-color: #45a049;
+        }
+        .upload-btn.has-file {
+            background-color: #2196F3;
+        }
+        .upload-btn.has-file:hover {
+            background-color: #0b7dda;
+        }
+        #imagePreview {
+            margin-top: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            flex-grow: 1;
+        }
+        #imagePreview img {
+            max-width: 100%;
+            max-height: 300px;
+            border-radius: 4px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        #dataPreview {
+            margin-top: 20px;
+            overflow-x: auto;
+            flex-grow: 1;
+        }
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .data-table th, .data-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        .data-table th {
+            background-color: #f2f2f2;
+        }
+        .remove-btn {
+            margin-top: 10px;
+            padding: 8px 16px;
+            background-color: #f44336;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            align-self: center;
+        }
+        .remove-btn:hover {
+            background-color: #d32f2f;
+        }
+        pre {
+            white-space: pre-wrap;
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="panel">
+        <h2>Изображение</h2>
+        <input type="file" id="imageUpload" accept="image/*">
+        <button id="imageButton" class="upload-btn">{{ "Добавить другую" if has_image else "Добавить изображение" }}</button>
+
+        <div id="imagePreview">
+            {% if current_image %}
+                <img src="/uploads/{{ current_image }}" alt="Загруженное изображение">
+                <button class="remove-btn" onclick="removeImage()">Удалить</button>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="panel">
+        <h2>Данные</h2>
+        <input type="file" id="dataUpload" accept=".csv,.xlsx,.txt">
+        <button id="dataButton" class="upload-btn">{{ "Заменить данные" if has_data else "Добавить данные" }}</button>
+
+        <div id="dataPreview">
+            {% if data_preview %}
+                {{ data_preview|safe }}
+                <button class="remove-btn" onclick="removeData()">Удалить данные</button>
+            {% endif %}
+        </div>
+    </div>
+
+    <script>
+        // Обработка изображений
+        const imageButton = document.getElementById('imageButton');
+        const imageUpload = document.getElementById('imageUpload');
+        const imagePreview = document.getElementById('imagePreview');
+
+        if ({{ has_image|tojson }}) {
+            imageButton.classList.add('has-file');
+        }
+
+        imageButton.addEventListener('click', () => {
+            imageUpload.click();
+        });
+
+        imageUpload.addEventListener('change', async (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/upload/image', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    updateImageUI(data.filename);
+                } else {
+                    const error = await response.json();
+                    alert(error.detail || 'Ошибка при загрузке изображения');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Произошла ошибка');
+            }
+        });
+
+        async function removeImage() {
+            try {
+                const response = await fetch('/remove/image', {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    updateImageUI(null);
+                } else {
+                    alert('Ошибка при удалении изображения');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Произошла ошибка');
+            }
+        }
+
+        function updateImageUI(filename) {
+            if (filename) {
+                imageButton.textContent = 'Добавить другую';
+                imageButton.classList.add('has-file');
+                imagePreview.innerHTML = `
+                    <img src="/uploads/${filename}" alt="Загруженное изображение">
+                    <button class="remove-btn" onclick="removeImage()">Удалить</button>
+                `;
+            } else {
+                imageButton.textContent = 'Добавить изображение';
+                imageButton.classList.remove('has-file');
+                imagePreview.innerHTML = '';
+                imageUpload.value = '';
+            }
+        }
+
+        // Обработка данных
+        const dataButton = document.getElementById('dataButton');
+        const dataUpload = document.getElementById('dataUpload');
+        const dataPreview = document.getElementById('dataPreview');
+
+        if ({{ has_data|tojson }}) {
+            dataButton.classList.add('has-file');
+        }
+
+        dataButton.addEventListener('click', () => {
+            dataUpload.click();
+        });
+
+        dataUpload.addEventListener('change', async (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/upload/data', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    updateDataUI(data.filename, data.preview);
+                } else {
+                    const error = await response.json();
+                    alert(error.detail || 'Ошибка при загрузке данных');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Произошла ошибка');
+            }
+        });
+
+        async function removeData() {
+            try {
+                const response = await fetch('/remove/data', {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    updateDataUI(null, '');
+                } else {
+                    alert('Ошибка при удалении данных');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Произошла ошибка');
+            }
+        }
+
+        function updateDataUI(filename, preview) {
+            if (filename && preview) {
+                dataButton.textContent = 'Заменить данные';
+                dataButton.classList.add('has-file');
+                dataPreview.innerHTML = preview +
+                    `<button class="remove-btn" onclick="removeData()">Удалить данные</button>`;
+            } else {
+                dataButton.textContent = 'Добавить данные';
+                dataButton.classList.remove('has-file');
+                dataPreview.innerHTML = '';
+                dataUpload.value = '';
+            }
+        }
+    </script>
+<div style="position: fixed; bottom: 20px; right: 20px;">
+    <button onclick="checkPaths()" style="padding: 10px 20px; background-color: #6a5acd; color: white; border: none; border-radius: 4px; cursor: pointer;">
+        Проверить пути
+    </button>
+</div>
+
+<script>
+async function checkPaths() {
+    try {
+        const response = await fetch('/check');
+        const data = await response.json();
+        alert(data.message);
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Произошла ошибка при проверке путей');
+    }
+}
+</script>
+
+</body>
+</html>
