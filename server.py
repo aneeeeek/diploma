@@ -11,10 +11,10 @@ from timeseries_analyzer import TimeSeriesAnalyzer
 from domain_specific_analyzer import DomainSpecificAnalyzer
 from chat_agent import ChatAgent
 
-# Вызываем set_page_config как первую команду
+# Вызов функции настройки страницы как первой команды
 set_page_config()
 
-# Функция для создания директорий (вызывается позже)
+# Функция для создания директорий
 def initialize_directories():
     Path(UPLOAD_DIR).mkdir(exist_ok=True)
     Path(DATA_DIR).mkdir(exist_ok=True)
@@ -27,12 +27,12 @@ domain_specific_analyzer = DomainSpecificAnalyzer(domain="finance")
 chat_agent = ChatAgent()
 
 def get_current_file(directory):
-    """Получаем текущий загруженный файл"""
+    """Получает текущий загруженный файл в указанной директории."""
     files = os.listdir(directory)
     return files[0] if files else None
 
 def read_data_preview(file_path):
-    """Читаем первые 5 строк из файла данных"""
+    """Читает первые 5 строк из файла данных для предварительного просмотра."""
     if file_path.endswith('.csv'):
         df = pd.read_csv(file_path, nrows=5)
         return df
@@ -46,7 +46,7 @@ def read_data_preview(file_path):
     return ""
 
 def clear_directory(directory):
-    """Очищает директорию"""
+    """Очищает указанную директорию от всех файлов."""
     for filename in os.listdir(directory):
         file_path = os.path.join(directory, filename)
         try:
@@ -76,12 +76,12 @@ def upload_data_callback(uploaded_data):
 def display_image_callback(current_image):
     if current_image:
         st.image(os.path.join(UPLOAD_DIR, current_image), use_column_width=True)
-        if st.button("Remove Image", key="remove_image"):
+        if st.button("Удалить изображение", key="remove_image"):
             clear_directory(UPLOAD_DIR)
             st.session_state.chat_history = []
             st.rerun()
     else:
-        st.info("No image uploaded")
+        st.info("Изображение не загружено")
 
 def display_data_callback(current_data):
     if current_data:
@@ -91,12 +91,12 @@ def display_data_callback(current_data):
             st.dataframe(preview)
         else:
             st.text(preview)
-        if st.button("Remove Data", key="remove_data"):
+        if st.button("Удалить данные", key="remove_data"):
             clear_directory(DATA_DIR)
             st.session_state.chat_history = []
             st.rerun()
     else:
-        st.info("No data uploaded")
+        st.info("Данные не загружены")
 
 def chat_callback(chat_container):
     # Инициализация состояния чата
@@ -110,7 +110,7 @@ def chat_callback(chat_container):
         if not st.session_state.chat_history:
             df, message = timeseries_analyzer.read_data(Path(data_path))
             if df is None:
-                st.session_state.chat_history.append({"role": "assistant", "content": f"Error: {message}"})
+                st.session_state.chat_history.append({"role": "assistant", "content": f"Ошибка: {message}"})
             else:
                 ts_features = timeseries_analyzer.analyze_time_series(df)
                 dash_features = dashboard_analyzer.analyze_dashboard(image_path)
@@ -118,7 +118,7 @@ def chat_callback(chat_container):
                 domain_annotation = domain_specific_analyzer.adapt_to_domain(general_annotation)
                 final_annotation = chat_agent.review_annotation(domain_annotation, ts_features, dash_features)
                 st.session_state.chat_history.append({"role": "assistant", "content": final_annotation})
-                logger.info(f"Initial annotation generated: {final_annotation}")
+                logger.info(f"Создана начальная аннотация: {final_annotation}")
 
     # Отображение истории чата
     with chat_container:
@@ -127,7 +127,7 @@ def chat_callback(chat_container):
                 st.markdown(message["content"])
 
     # Ввод пользователя
-    user_input = st.chat_input("Ask a question about the dashboard...")
+    user_input = st.chat_input("Задайте вопрос о дашборде...")
     if user_input:
         st.session_state.chat_history.append({"role": "user", "content": user_input})
         image_path = os.path.join(UPLOAD_DIR, get_current_file(UPLOAD_DIR)) if get_current_file(UPLOAD_DIR) else None
@@ -136,7 +136,7 @@ def chat_callback(chat_container):
         st.session_state.chat_history.append({"role": "assistant", "content": response})
         st.rerun()
 
-# Настройка интерфейса
+# Настройка пользовательского интерфейса
 setup_interface(
     upload_image_callback=upload_image_callback,
     upload_data_callback=upload_data_callback,

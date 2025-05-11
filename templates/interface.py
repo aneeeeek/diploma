@@ -16,10 +16,10 @@ def setup_interface(
 
     # Панель для изображения
     with col1:
-        st.header("Dashboard Image")
+        st.header("Изображение дашборда")
         display_image_callback(get_current_image())
         uploaded_image = st.file_uploader(
-            "Upload Dashboard Image",
+            "Загрузите изображение дашборда",
             type=["png", "jpg", "jpeg", "gif"],
             key="image_uploader",
             accept_multiple_files=False
@@ -29,10 +29,10 @@ def setup_interface(
 
     # Панель для данных
     with col2:
-        st.header("Time Series Data")
+        st.header("Данные временного ряда")
         display_data_callback(get_current_data())
         uploaded_data = st.file_uploader(
-            "Upload Data File",
+            "Загрузить файл данных",
             type=["csv", "txt", "xlsx"],
             key="data_uploader",
             accept_multiple_files=False
@@ -42,7 +42,7 @@ def setup_interface(
 
     # Панель для чата
     with col3:
-        st.header("Annotations & Chat")
+        st.header("Аннотация к временному ряду и чат")
         chat_container = st.container()
         chat_callback(chat_container)
 

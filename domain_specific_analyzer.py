@@ -6,8 +6,8 @@ class DomainSpecificAnalyzer:
         self.domain_terms = DOMAIN_TERMS.get(domain, {})
 
     def adapt_to_domain(self, annotation: str) -> str:
-        """Адаптирует аннотацию к домену."""
+        """Адаптирует аннотацию к специфичному домену."""
         for general_term, domain_term in self.domain_terms.items():
             annotation = annotation.replace(general_term, domain_term)
-        logger.info(f"Domain-adapted annotation: {annotation}")
+        logger.info(f"Аннотация, адаптированная к домену: {annotation}")
         return annotation
