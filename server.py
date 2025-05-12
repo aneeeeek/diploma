@@ -6,10 +6,9 @@ from pathlib import Path
 import shutil
 from templates.interface import setup_interface
 from config import UPLOAD_DIR, DATA_DIR, ALLOWED_IMAGE_EXTENSIONS, ALLOWED_DATA_EXTENSIONS, logger
-from dashboard_analyzer import DashboardAnalyzer
-from timeseries_analyzer import TimeSeriesAnalyzer
-from domain_specific_analyzer import DomainSpecificAnalyzer
-from chat_agent import ChatAgent
+from langgraph.graph import StateGraph, END
+from typing import TypedDict, Dict, Optional
+import asyncio
 
 # Вызов функции настройки страницы как первой команды
 set_page_config()
@@ -19,13 +18,113 @@ def initialize_directories():
     Path(UPLOAD_DIR).mkdir(exist_ok=True)
     Path(DATA_DIR).mkdir(exist_ok=True)
 
-# Инициализация агентов и директорий
+# Инициализация директорий
 initialize_directories()
-dashboard_analyzer = DashboardAnalyzer()
-timeseries_analyzer = TimeSeriesAnalyzer()
-domain_specific_analyzer = DomainSpecificAnalyzer(domain="finance")
-chat_agent = ChatAgent()
 
+# Состояние графа
+class AgentState(TypedDict):
+    image_path: Optional[str]
+    data_path: Optional[str]
+    dash_features: Optional[Dict]
+    ts_features: Optional[Dict]
+    general_annotation: Optional[str]
+    domain_annotation: Optional[str]
+    final_annotation: Optional[str]
+    user_query: Optional[str]
+    chat_history: list
+    response: Optional[str]
+
+# Определение графа задач
+def create_graph():
+    from dashboard_analyzer import DashboardAnalyzer
+    from timeseries_analyzer import TimeSeriesAnalyzer
+    from domain_specific_analyzer import DomainSpecificAnalyzer
+    from chat_agent import ChatAgent
+
+    dashboard_analyzer = DashboardAnalyzer()
+    timeseries_analyzer = TimeSeriesAnalyzer()
+    domain_specific_analyzer = DomainSpecificAnalyzer(domain="finance")
+    chat_agent = ChatAgent()
+
+    graph = StateGraph(AgentState)
+
+    # Узел для анализа изображения дашборда
+    def analyze_dashboard(state: AgentState) -> AgentState:
+        if state["image_path"]:
+            state["dash_features"] = dashboard_analyzer.analyze_dashboard(state["image_path"])
+        return state
+
+    # Узел для анализа временного ряда
+    def analyze_timeseries(state: AgentState) -> AgentState:
+        if state["data_path"]:
+            df, message = timeseries_analyzer.read_data(Path(state["data_path"]))
+            if df is None:
+                state["ts_features"] = {"error": message}
+            else:
+                state["ts_features"] = timeseries_analyzer.analyze_time_series(df)
+        return state
+
+    # Узел для генерации общей аннотации
+    def generate_annotation(state: AgentState) -> AgentState:
+        if state["dash_features"] and state["ts_features"]:
+            state["general_annotation"] = chat_agent.generate_general_annotation(
+                state["ts_features"], state["dash_features"]
+            )
+        return state
+
+    # Узел для адаптации аннотации к домену
+    def adapt_annotation(state: AgentState) -> AgentState:
+        if state["general_annotation"]:
+            state["domain_annotation"] = domain_specific_analyzer.adapt_to_domain(
+                state["general_annotation"]
+            )
+        return state
+
+    # Узел для проверки аннотации
+    def review_annotation(state: AgentState) -> AgentState:
+        if state["domain_annotation"] and state["dash_features"] and state["ts_features"]:
+            state["final_annotation"] = chat_agent.review_annotation(
+                state["domain_annotation"], state["ts_features"], state["dash_features"]
+            )
+        return state
+
+    # Узел для обработки пользовательского запроса
+    def process_query(state: AgentState) -> AgentState:
+        if state["user_query"]:
+            state["response"] = chat_agent.process_user_query(
+                state["user_query"],
+                state["image_path"],
+                state["data_path"],
+                state["chat_history"]
+            )
+        return state
+
+    # Добавляем узлы в граф
+    graph.add_node("analyze_dashboard", analyze_dashboard)
+    graph.add_node("analyze_timeseries", analyze_timeseries)
+    graph.add_node("generate_annotation", generate_annotation)
+    graph.add_node("adapt_annotation", adapt_annotation)
+    graph.add_node("review_annotation", review_annotation)
+    graph.add_node("process_query", process_query)
+
+    # Определяем последовательность выполнения
+    graph.set_entry_point("analyze_dashboard")
+    graph.add_edge("analyze_dashboard", "analyze_timeseries")
+    graph.add_edge("analyze_timeseries", "generate_annotation")
+    graph.add_edge("generate_annotation", "adapt_annotation")
+    graph.add_edge("adapt_annotation", "review_annotation")
+    graph.add_edge("review_annotation", END)
+    graph.add_conditional_edges(
+        "process_query",
+        lambda state: END if state["response"] else "process_query"
+    )
+
+    return graph.compile()
+
+# Инициализация графа
+graph = create_graph()
+
+# Callback-функции для интерфейса
 def get_current_file(directory):
     """Получает текущий загруженный файл в указанной директории."""
     files = os.listdir(directory)
@@ -58,7 +157,6 @@ def clear_directory(directory):
             st.error(f'Ошибка при удалении {file_path}: {e}')
             logger.error(f'Ошибка при удалении {file_path}: {e}')
 
-# Callback-функции для интерфейса
 def upload_image_callback(uploaded_image):
     clear_directory(UPLOAD_DIR)
     with open(os.path.join(UPLOAD_DIR, uploaded_image.name), "wb") as f:
@@ -98,6 +196,10 @@ def display_data_callback(current_data):
     else:
         st.info("Данные не загружены")
 
+async def run_graph(state):
+    """Запускает граф асинхронно."""
+    return await graph.ainvoke(state)
+
 def chat_callback(chat_container):
     # Инициализация состояния чата
     if 'chat_history' not in st.session_state:
@@ -108,17 +210,24 @@ def chat_callback(chat_container):
         image_path = os.path.join(UPLOAD_DIR, get_current_file(UPLOAD_DIR))
         data_path = os.path.join(DATA_DIR, get_current_file(DATA_DIR))
         if not st.session_state.chat_history:
-            df, message = timeseries_analyzer.read_data(Path(data_path))
-            if df is None:
-                st.session_state.chat_history.append({"role": "assistant", "content": f"Ошибка: {message}"})
-            else:
-                ts_features = timeseries_analyzer.analyze_time_series(df)
-                dash_features = dashboard_analyzer.analyze_dashboard(image_path)
-                general_annotation = chat_agent.generate_general_annotation(ts_features, dash_features)
-                domain_annotation = domain_specific_analyzer.adapt_to_domain(general_annotation)
-                final_annotation = chat_agent.review_annotation(domain_annotation, ts_features, dash_features)
-                st.session_state.chat_history.append({"role": "assistant", "content": final_annotation})
-                logger.info(f"Создана начальная аннотация: {final_annotation}")
+            state = AgentState(
+                image_path=image_path,
+                data_path=data_path,
+                chat_history=st.session_state.chat_history,
+                dash_features=None,
+                ts_features=None,
+                general_annotation=None,
+                domain_annotation=None,
+                final_annotation=None,
+                user_query=None,
+                response=None
+            )
+            result = asyncio.run(run_graph(state))
+            if result["final_annotation"]:
+                st.session_state.chat_history.append(
+                    {"role": "assistant", "content": result["final_annotation"]}
+                )
+                logger.info(f"Создана начальная аннотация: {result['final_annotation']}")
 
     # Отображение истории чата
     with chat_container:
@@ -132,8 +241,23 @@ def chat_callback(chat_container):
         st.session_state.chat_history.append({"role": "user", "content": user_input})
         image_path = os.path.join(UPLOAD_DIR, get_current_file(UPLOAD_DIR)) if get_current_file(UPLOAD_DIR) else None
         data_path = os.path.join(DATA_DIR, get_current_file(DATA_DIR)) if get_current_file(DATA_DIR) else None
-        response = chat_agent.process_user_query(user_input, image_path, data_path, st.session_state.chat_history)
-        st.session_state.chat_history.append({"role": "assistant", "content": response})
+        state = AgentState(
+            image_path=image_path,
+            data_path=data_path,
+            chat_history=st.session_state.chat_history,
+            user_query=user_input,
+            dash_features=None,
+            ts_features=None,
+            general_annotation=None,
+            domain_annotation=None,
+            final_annotation=None,
+            response=None
+        )
+        result = asyncio.run(run_graph(state))
+        if result["response"]:
+            st.session_state.chat_history.append(
+                {"role": "assistant", "content": result["response"]}
+            )
         st.rerun()
 
 # Настройка пользовательского интерфейса

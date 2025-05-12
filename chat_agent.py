@@ -1,6 +1,8 @@
 import json
 from typing import List, Dict, Optional
-from config import client, logger
+from config import llm, logger
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 
 class ChatAgent:
     def generate_general_annotation(self, ts_features: Dict, dash_features: Dict) -> str:
@@ -24,20 +26,21 @@ class ChatAgent:
 
     def review_annotation(self, annotation: str, ts_features: Dict, dash_features: Dict) -> str:
         """Проверяет аннотацию на соответствие данным."""
-        prompt = f"""Проверьте аннотацию на согласованность с данными:
-        Аннотация: {annotation}
-        Характеристики временного ряда: {json.dumps(ts_features)}
-        Характеристики дашборда: {json.dumps(dash_features)}
-        Убедитесь, что аннотация ясна, полна и соответствует данным. Верните исправленную аннотацию."""
+        prompt = ChatPromptTemplate.from_template(
+            """Проверьте аннотацию на согласованность с данными:
+            Аннотация: {annotation}
+            Характеристики временного ряда: {ts_features}
+            Характеристики дашборда: {dash_features}
+            Убедитесь, что аннотация ясна, полна и соответствует данным. Верните исправленную аннотацию."""
+        )
+        chain = prompt | llm | StrOutputParser()
         try:
-            response = client.chat.completions.create(
-                model="openai.gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=500,
-                temperature=0.5,
-                stream=False
-            )
-            return response.choices[0].message.content
+            response = chain.invoke({
+                "annotation": annotation,
+                "ts_features": json.dumps(ts_features),
+                "dash_features": json.dumps(dash_features)
+            })
+            return response
         except Exception as e:
             logger.error(f"Ошибка при проверке аннотации: {str(e)}")
             return annotation
@@ -53,20 +56,20 @@ class ChatAgent:
             agent = "general"
 
         context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in chat_history[-5:]])
-        prompt = f"""Запрос пользователя: {query}
-        Контекст: {context}
-        Агент: {agent}
-        Дайте краткий ответ на основе данных дашборда и временного ряда. Используйте термины, специфичные для финансовой области."""
-
+        prompt = ChatPromptTemplate.from_template(
+            """Запрос пользователя: {query}
+            Контекст: {context}
+            Агент: {agent}
+            Дайте краткий ответ на основе данных дашборда и временного ряда. Используйте термины, специфичные для финансовой области."""
+        )
+        chain = prompt | llm | StrOutputParser()
         try:
-            response = client.chat.completions.create(
-                model="openai.gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=300,
-                temperature=0.5,
-                stream=False
-            )
-            return response.choices[0].message.content
+            response = chain.invoke({
+                "query": query,
+                "context": context,
+                "agent": agent
+            })
+            return response
         except Exception as e:
             logger.error(f"Ошибка обработки запроса: {str(e)}")
             return f"Ошибка обработки запроса: {str(e)}"
