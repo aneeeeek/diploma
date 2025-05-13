@@ -72,7 +72,7 @@ def upload_data_callback(uploaded_data):
 
 def display_image_callback(current_image):
     if current_image:
-        st.image(os.path.join(UPLOAD_DIR, current_image), use_column_width=True)
+        st.image(os.path.join(UPLOAD_DIR, current_image), use_container_width=True)
         if st.button("Удалить изображение", key="remove_image"):
             clear_directory(UPLOAD_DIR)
             st.session_state.chat_history = []

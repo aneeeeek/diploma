@@ -10,12 +10,13 @@ def setup_interface(
     get_current_data,
     clear_directory_callback
 ):
-    """Настраивает интерфейс с тремя колонками для изображения, данных и чата."""
-    # Создаем три колонки
-    col1, col2, col3 = st.columns([2, 2, 3])
+    """Настраивает интерфейс с двумя колонками: дашборд и данные в одной, чат в другой."""
+    # Создаем две колонки
+    col1, col2 = st.columns([3, 3])
 
-    # Панель для изображения
+    # Первая колонка: изображение дашборда и данные
     with col1:
+        # Панель для изображения
         st.header("Изображение дашборда")
         display_image_callback(get_current_image())
         uploaded_image = st.file_uploader(
@@ -27,8 +28,7 @@ def setup_interface(
         if uploaded_image is not None:
             upload_image_callback(uploaded_image)
 
-    # Панель для данных
-    with col2:
+        # Панель для данных
         st.header("Данные временного ряда")
         display_data_callback(get_current_data())
         uploaded_data = st.file_uploader(
@@ -40,10 +40,10 @@ def setup_interface(
         if uploaded_data is not None:
             upload_data_callback(uploaded_data)
 
-    # Панель для чата
-    with col3:
+    # Вторая колонка: чат
+    with col2:
         st.header("Аннотация к временному ряду и чат")
         chat_container = st.container()
         chat_callback(chat_container)
 
-    return col1, col2, col3
+    return col1, col2
