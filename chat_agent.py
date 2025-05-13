@@ -13,14 +13,14 @@ class ChatAgent:
             return error_msg
 
         annotation = []
-        annotation.append(f"Дашборд отображает график типа {dash_features.get('graph_type', 'неизвестный')} с трендом {dash_features.get('trend', 'неизвестный')}.")
+        annotation.append(f"Дашборд показывает тренд {dash_features.get('trend', 'неизвестный')}.")
         annotation.append(f"Основной показатель: {dash_features.get('main_metric', 'неизвестный')}.")
-        annotation.append(f"Анализ временного ряда показывает тренд {ts_features.get('trend', 'неизвестный')}.")
-        if ts_features.get('seasonality') == "present":
-            annotation.append("Обнаружены сезонные закономерности.")
-        if ts_features.get('anomalies', 0) > 0:
-            annotation.append(f"Обнаружено {ts_features.get('anomalies')} аномалий.")
-        annotation.append(f"Уровень поддержки: {ts_features.get('support', 'неизвестный')}, Уровень сопротивления: {ts_features.get('resistance', 'неизвестный')}.")
+        annotation.append(f"Сезонность: {dash_features.get('seasonality', 'неизвестно')}.")
+        if dash_features.get('anomalies', 'неизвестно') != 'неизвестно':
+            annotation.append(f"Аномалии: {dash_features.get('anomalies')}.")
+        annotation.append(f"Минимальное значение: {dash_features.get('min_value', 'неизвестно')}.")
+        annotation.append(f"Максимальное значение: {dash_features.get('max_value', 'неизвестно')}.")
+        annotation.append(f"Сравнение с данными временного ряда: тренд {'совпадает' if dash_features.get('trend') == ts_features.get('trend') else 'различается'}.")
 
         return " ".join(annotation)
 
@@ -48,9 +48,9 @@ class ChatAgent:
     def process_user_query(self, query: str, image_path: Optional[str], data_path: Optional[str], chat_history: List[Dict]) -> str:
         """Обрабатывает запрос пользователя."""
         query_lower = query.lower()
-        if any(keyword in query_lower for keyword in ["тренд", "закономерность", "сезонность", "аномалия"]):
-            agent = "time_series"
-        elif any(keyword in query_lower for keyword in ["показатель", "kpi", "график", "дашборд"]):
+        if any(keyword in query_lower for keyword in ["тренд", "закономерность", "сезонность", "аномалия", "минимум", "максимум"]):
+            agent = "dashboard"
+        elif any(keyword in query_lower for keyword in ["показатель", "kpi"]):
             agent = "dashboard"
         else:
             agent = "general"

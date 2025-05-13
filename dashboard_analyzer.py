@@ -18,16 +18,14 @@ class DashboardAnalyzer:
 
     def extract_json_from_markdown(self, content: str) -> str:
         """Извлекает JSON из markdown-блока, удаляя ```json и ```."""
-        # Удаляем markdown-обертку ```json ... ```
         json_pattern = r"```json\s*([\s\S]*?)\s*```"
         match = re.search(json_pattern, content)
         if match:
             return match.group(1).strip()
-        # Если markdown не найден, возвращаем исходный контент
         return content.strip()
 
     def analyze_dashboard(self, image_path: str) -> dict:
-        """Анализирует изображение дашборда, передавая его в LLM в формате base64."""
+        """Анализирует изображение дашборда, извлекая характеристики временного ряда."""
         # Кодируем изображение
         try:
             base64_image = self.encode_image(image_path)
@@ -35,10 +33,15 @@ class DashboardAnalyzer:
             return {"error": f"Не удалось закодировать изображение: {str(e)}"}
 
         # Формируем промпт для анализа изображения
-        prompt = """Проанализируйте изображение дашборда. Извлеките ключевые показатели и визуальные элементы (например, графики, KPI). Верните JSON с:
-        - main_metric: основной показатель или значение
-        - graph_type: тип графика (линейный, столбчатый и т.д.)
+        prompt = """Ты успешный аналитик временных рядов. 
+        Проанализируй изображение дашборда, содержащее временной ряд. Извлеки следующие характеристики и верни их в формате JSON:
+        - main_metric: основной показатель для временного ряда (например, "Продажи золота")
         - trend: визуальный тренд (восходящий, нисходящий, стабильный)
+        - seasonality: наличие сезонности (присутствует, отсутствует)
+        - anomalies: наличие аномалий (описание или количество, если есть)
+        - min_value: минимальное значение и предполагаемая дата (например, "$50,000 на 2023-01-15")
+        - max_value: максимальное значение и предполагаемая дата (например, "$150,000 на 2023-06-30")
+        Если какие-то данные не удается определить, укажи "неизвестно".
         """
 
         try:
@@ -59,11 +62,10 @@ class DashboardAnalyzer:
                         ]
                     }
                 ],
-                max_tokens=200,
+                max_tokens=300,
                 temperature=0.5,
                 stream=False
             )
-            print(response)
             content = response.choices[0].message.content
             # Извлекаем JSON из markdown, если он есть
             json_content = self.extract_json_from_markdown(content)
