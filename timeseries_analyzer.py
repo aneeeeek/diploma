@@ -49,18 +49,23 @@ class TimeSeriesAnalyzer:
         autocorr = data.autocorr(lag=1)
         features["seasonality"] = "присутствует" if abs(autocorr) > 0.3 else "не обнаружена"
 
-        # Определение аномалий
+        # Определение аномалий с датами
         q1 = data.quantile(0.25)
         q3 = data.quantile(0.75)
         iqr = q3 - q1
         lower_bound = q1 - 1.5 * iqr
         upper_bound = q3 + 1.5 * iqr
         anomalies = data[(data < lower_bound) | (data > upper_bound)]
-        features["anomalies"] = len(anomalies)
 
-        # Уровни поддержки и сопротивления
-        features["support"] = round(q1, 2)
-        features["resistance"] = round(q3, 2)
+        # Проверяем наличие столбца с датами (предполагаем, что это первый столбец)
+        date_col = df.columns[0] if len(df.columns) > 1 and pd.api.types.is_datetime64_any_dtype(df[df.columns[0]]) else None
+        anomalies_list = []
+        if len(anomalies) > 0:
+            for idx in anomalies.index:
+                value = anomalies.loc[idx]
+                date = df.loc[idx, date_col].strftime('%Y-%m-%d') if date_col else "неизвестно"
+                anomalies_list.append({"value": round(float(value), 2), "date": date})
+        features["anomalies"] = anomalies_list
 
         logger.info(f"Характеристики временного ряда: {features}")
         return features

@@ -17,10 +17,20 @@ class ChatAgent:
         annotation.append(f"Основной показатель: {dash_features.get('main_metric', 'неизвестный')}.")
         annotation.append(f"Сезонность: {dash_features.get('seasonality', 'неизвестно')}.")
         if dash_features.get('anomalies', 'неизвестно') != 'неизвестно':
-            annotation.append(f"Аномалии: {dash_features.get('anomalies')}.")
+            anomalies_str = ", ".join([f"{a['value']} на {a['date']}" for a in dash_features.get('anomalies', [])])
+            annotation.append(f"Аномалии: {anomalies_str if anomalies_str else 'не обнаружены'}.")
         annotation.append(f"Минимальное значение: {dash_features.get('min_value', 'неизвестно')}.")
         annotation.append(f"Максимальное значение: {dash_features.get('max_value', 'неизвестно')}.")
         annotation.append(f"Сравнение с данными временного ряда: тренд {'совпадает' if dash_features.get('trend') == ts_features.get('trend') else 'различается'}.")
+
+        # Аннотация для временного ряда
+        annotation.append(f"Анализ временного ряда показывает тренд {ts_features.get('trend', 'неизвестный')}.")
+        annotation.append(f"Сезонность: {ts_features.get('seasonality', 'неизвестно')}.")
+        if ts_features.get('anomalies', []):
+            anomalies_str = ", ".join([f"{a['value']} на {a['date']}" for a in ts_features.get('anomalies', [])])
+            annotation.append(f"Аномалии: {anomalies_str}.")
+        else:
+            annotation.append("Аномалии: не обнаружены.")
 
         return " ".join(annotation)
 
