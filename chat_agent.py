@@ -7,12 +7,14 @@ from langchain_core.output_parsers import StrOutputParser
 class ChatAgent:
     def generate_general_annotation(self, ts_features: Dict, dash_features: Dict) -> str:
         """Создает общую аннотацию на основе характеристик данных."""
-        if "error" in ts_features or "error" in dash_features:
+        if "error" in dash_features or ("mathematical" not in ts_features and "llm" not in ts_features):
             error_msg = f"Ошибка: Невозможно создать аннотацию из-за некорректных данных. Временной ряд: {ts_features.get('error', '')}, Дашборд: {dash_features.get('error', '')}"
             logger.error(error_msg)
             return error_msg
 
         annotation = []
+
+        # Аннотация для дашборда
         annotation.append(f"Дашборд показывает тренд {dash_features.get('trend', 'неизвестный')}.")
         annotation.append(f"Основной показатель: {dash_features.get('main_metric', 'неизвестный')}.")
         annotation.append(f"Сезонность: {dash_features.get('seasonality', 'неизвестно')}.")
@@ -21,16 +23,30 @@ class ChatAgent:
             annotation.append(f"Аномалии: {anomalies_str if anomalies_str else 'не обнаружены'}.")
         annotation.append(f"Минимальное значение: {dash_features.get('min_value', 'неизвестно')}.")
         annotation.append(f"Максимальное значение: {dash_features.get('max_value', 'неизвестно')}.")
-        annotation.append(f"Сравнение с данными временного ряда: тренд {'совпадает' if dash_features.get('trend') == ts_features.get('trend') else 'различается'}.")
 
-        # Аннотация для временного ряда
-        annotation.append(f"Анализ временного ряда показывает тренд {ts_features.get('trend', 'неизвестный')}.")
-        annotation.append(f"Сезонность: {ts_features.get('seasonality', 'неизвестно')}.")
-        if ts_features.get('anomalies', []):
-            anomalies_str = ", ".join([f"{a['value']} на {a['date']}" for a in ts_features.get('anomalies', [])])
+        # Аннотация для математического анализа временного ряда
+        ts_math = ts_features.get("mathematical", {})
+        annotation.append(f"Математический анализ временного ряда показывает тренд {ts_math.get('trend', 'неизвестный')}.")
+        annotation.append(f"Сезонность: {ts_math.get('seasonality', 'неизвестно')}.")
+        if ts_math.get('anomalies', []):
+            anomalies_str = ", ".join([f"{a['value']} на {a['date']}" for a in ts_math.get('anomalies', [])])
             annotation.append(f"Аномалии: {anomalies_str}.")
         else:
             annotation.append("Аномалии: не обнаружены.")
+        annotation.append(f"Сравнение с дашбордом: тренд {'совпадает' if dash_features.get('trend') == ts_math.get('trend') else 'различается'}.")
+
+        # Аннотация для LLM анализа временного ряда
+        ts_llm = ts_features.get("llm", {})
+        annotation.append(f"Анализ временного ряда через LLM показывает тренд {ts_llm.get('trend', 'неизвестный')}.")
+        annotation.append(f"Сезонность: {ts_llm.get('seasonality', 'неизвестно')}.")
+        if ts_llm.get('anomalies', []):
+            anomalies_str = ", ".join([f"{a['value']} на {a['date']}" for a in ts_llm.get('anomalies', [])])
+            annotation.append(f"Аномалии: {anomalies_str}.")
+        else:
+            annotation.append("Аномалии: не обнаружены.")
+        annotation.append(f"Минимальное значение: {ts_llm.get('min_value', 'неизвестно')}.")
+        annotation.append(f"Максимальное значение: {ts_llm.get('max_value', 'неизвестно')}.")
+        annotation.append(f"Сравнение с математическим анализом: тренд {'совпадает' if ts_llm.get('trend') == ts_math.get('trend') else 'различается'}.")
 
         return " ".join(annotation)
 
@@ -39,7 +55,7 @@ class ChatAgent:
         prompt = ChatPromptTemplate.from_template(
             """Проверьте аннотацию на согласованность с данными:
             Аннотация: {annotation}
-            Характеристики временного ряда: {ts_features}
+            Характеристики временного ряда (математический и LLM): {ts_features}
             Характеристики дашборда: {dash_features}
             Убедитесь, что аннотация ясна, полна и соответствует данным. Верните исправленную аннотацию."""
         )
