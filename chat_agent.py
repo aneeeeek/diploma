@@ -6,58 +6,70 @@ from langchain_core.output_parsers import StrOutputParser
 
 class ChatAgent:
     def generate_general_annotation(self, ts_features: Dict, dash_features: Dict) -> str:
-        """Создает общую аннотацию на основе характеристик данных."""
+        """Создает краткую аннотацию на естественном языке с приоритизацией информации."""
         if "error" in dash_features or ("mathematical" not in ts_features and "llm" not in ts_features):
             error_msg = f"Ошибка: Невозможно создать аннотацию из-за некорректных данных. Временной ряд: {ts_features.get('error', '')}, Дашборд: {dash_features.get('error', '')}"
             logger.error(error_msg)
             return error_msg
 
-        annotation = []
-
-        # Аннотация для дашборда
-        annotation.append(f"Дашборд показывает тренд {dash_features.get('trend', 'неизвестный')}.")
-        annotation.append(f"Основной показатель: {dash_features.get('main_metric', 'неизвестный')}.")
-        annotation.append(f"Сезонность: {dash_features.get('seasonality', 'неизвестно')}.")
-        if dash_features.get('anomalies', 'неизвестно') != 'неизвестно':
-            anomalies_str = ", ".join([f"{a['value']} на {a['date']}" for a in dash_features.get('anomalies', [])])
-            annotation.append(f"Аномалии: {anomalies_str if anomalies_str else 'не обнаружены'}.")
-        annotation.append(f"Минимальное значение: {dash_features.get('min_value', 'неизвестно')}.")
-        annotation.append(f"Максимальное значение: {dash_features.get('max_value', 'неизвестно')}.")
-
-        # Аннотация для математического анализа временного ряда
+        # Извлекаем данные с учетом приоритетов
         ts_math = ts_features.get("mathematical", {})
-        annotation.append(f"Математический анализ временного ряда показывает тренд {ts_math.get('trend', 'неизвестный')}.")
-        annotation.append(f"Сезонность: {ts_math.get('seasonality', 'неизвестно')}.")
-        if ts_math.get('anomalies', []):
-            anomalies_str = ", ".join([f"{a['value']} на {a['date']}" for a in ts_math.get('anomalies', [])])
-            annotation.append(f"Аномалии: {anomalies_str}.")
-        else:
-            annotation.append("Аномалии: не обнаружены.")
-        annotation.append(f"Сравнение с дашбордом: тренд {'совпадает' if dash_features.get('trend') == ts_math.get('trend') else 'различается'}.")
-
-        # Аннотация для LLM анализа временного ряда
         ts_llm = ts_features.get("llm", {})
-        annotation.append(f"Анализ временного ряда через LLM показывает тренд {ts_llm.get('trend', 'неизвестный')}.")
-        annotation.append(f"Сезонность: {ts_llm.get('seasonality', 'неизвестно')}.")
-        if ts_llm.get('anomalies', []):
-            anomalies_str = ", ".join([f"{a['value']} на {a['date']}" for a in ts_llm.get('anomalies', [])])
-            annotation.append(f"Аномалии: {anomalies_str}.")
-        else:
-            annotation.append("Аномалии: не обнаружены.")
-        annotation.append(f"Минимальное значение: {ts_llm.get('min_value', 'неизвестно')}.")
-        annotation.append(f"Максимальное значение: {ts_llm.get('max_value', 'неизвестно')}.")
-        annotation.append(f"Сравнение с математическим анализом: тренд {'совпадает' if ts_llm.get('trend') == ts_math.get('trend') else 'различается'}.")
 
-        return " ".join(annotation)
+        # Приоритет: математический анализ для тренда, сезонности, максимума и минимума
+        trend = ts_math.get("trend", "неизвестный")
+        seasonality = ts_math.get("seasonality", "неизвестно")
+        math_min = ts_math.get("min_value", "неизвестно")
+        math_max = ts_math.get("max_value", "неизвестно")
+
+        # Визуальные максимум и минимум из дашборда
+        visual_min = dash_features.get("min_value", "неизвестно")
+        visual_max = dash_features.get("max_value", "неизвестно")
+        main_metric = dash_features.get("main_metric", "неизвестный")
+
+        # Аномалии из LLM
+        anomalies = ts_llm.get("anomalies", [])
+        anomalies_str = ", ".join([f"{a['value']} на {a['date']}" for a in anomalies]) if anomalies else "не обнаружены"
+
+        # Формируем базовую аннотацию
+        annotation = f"Дашборд отображает {main_metric} с {trend} трендом и {seasonality} сезонностью. "
+        if visual_max != "неизвестно" or visual_min != "неизвестно":
+            annotation += f"Визуально максимальное значение {visual_max}, минимальное {visual_min}. "
+        if math_max != "неизвестно" or math_min != "неизвестно":
+            annotation += f"По данным, максимум {math_max}, минимум {math_min}. "
+        if anomalies_str != "не обнаружены":
+            annotation += f"Обнаружены аномалии: {anomalies_str}. "
+
+        # Запрос к LLM для предположения о причинах аномалий
+        if anomalies:
+            prompt = ChatPromptTemplate.from_template(
+                """На основе данных временного ряда были обнаружены аномалии: {anomalies}.
+                Сделай краткое предположение (1-2 предложения) о возможных причинах этих аномалий в контексте финансовой области.
+                Укажи, что это предположение, и избегай конкретных утверждений."""
+            )
+            chain = prompt | llm | StrOutputParser()
+            try:
+                anomalies_context = json.dumps(anomalies)
+                hypothesis = chain.invoke({"anomalies": anomalies_context})
+                annotation += f"Предположительно, аномалии могут быть связаны с {hypothesis.lower().rstrip('.')}. "
+            except Exception as e:
+                logger.error(f"Ошибка при генерации гипотезы для аномалий: {str(e)}")
+                annotation += "Причины аномалий неизвестны. "
+
+        # Удаляем лишние пробелы и возвращаем аннотацию
+        annotation = " ".join(annotation.split())
+        logger.info(f"Сгенерирована аннотация: {annotation}")
+        return annotation
 
     def review_annotation(self, annotation: str, ts_features: Dict, dash_features: Dict) -> str:
-        """Проверяет аннотацию на соответствие данным."""
+        """Проверяет и улучшает аннотацию на естественность и согласованность."""
         prompt = ChatPromptTemplate.from_template(
-            """Проверьте аннотацию на согласованность с данными:
+            """Проверь аннотацию на естественность, краткость и согласованность с данными:
             Аннотация: {annotation}
-            Характеристики временного ряда (математический и LLM): {ts_features}
+            Характеристики временного ряда: {ts_features}
             Характеристики дашборда: {dash_features}
-            Убедитесь, что аннотация ясна, полна и соответствует данным. Верните исправленную аннотацию."""
+            Убедись, что аннотация звучит естественно, как текст для человека, и не содержит противоречий.
+            Верни улучшенную версию аннотации, сохраняя краткость."""
         )
         chain = prompt | llm | StrOutputParser()
         try:
@@ -66,13 +78,14 @@ class ChatAgent:
                 "ts_features": json.dumps(ts_features),
                 "dash_features": json.dumps(dash_features)
             })
+            logger.info(f"Улучшенная аннотация: {response}")
             return response
         except Exception as e:
             logger.error(f"Ошибка при проверке аннотации: {str(e)}")
             return annotation
 
     def process_user_query(self, query: str, image_path: Optional[str], data_path: Optional[str], chat_history: List[Dict]) -> str:
-        """Обрабатывает запрос пользователя."""
+        """Обрабатывает запрос пользователя с учетом контекста и финансовых терминов."""
         query_lower = query.lower()
         if any(keyword in query_lower for keyword in ["тренд", "закономерность", "сезонность", "аномалия", "минимум", "максимум"]):
             agent = "dashboard"
@@ -95,6 +108,7 @@ class ChatAgent:
                 "context": context,
                 "agent": agent
             })
+            logger.info(f"Ответ на запрос пользователя: {response}")
             return response
         except Exception as e:
             logger.error(f"Ошибка обработки запроса: {str(e)}")
