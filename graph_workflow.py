@@ -23,7 +23,7 @@ def create_graph():
     """Создает и настраивает граф задач для анализа дашборда и временного ряда."""
     dashboard_analyzer = DashboardAnalyzer()
     timeseries_analyzer = TimeSeriesAnalyzer()
-    domain_specific_analyzer = DomainSpecificAnalyzer(domain="finance")
+    domain_specific_analyzer = DomainSpecificAnalyzer(default_domain="")
     chat_agent = ChatAgent()
 
     graph = StateGraph(AgentState)
@@ -56,7 +56,9 @@ def create_graph():
     def adapt_annotation(state: AgentState) -> AgentState:
         if state["general_annotation"]:
             state["domain_annotation"] = domain_specific_analyzer.adapt_to_domain(
-                state["general_annotation"]
+                state["general_annotation"],
+                state["image_path"],
+                state["data_path"]
             )
         return state
 
