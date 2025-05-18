@@ -22,22 +22,6 @@ llm = ChatOpenAI(
     max_tokens=500
 )
 
-# Пример домен-специфичных терминов
-DOMAIN_TERMS = {
-    "finance": {
-        "trend": "ценовой тренд",
-        "anomaly": "аномальное движение цены",
-        "support": "уровень поддержки",
-        "resistance": "уровень сопротивления"
-    },
-    "retail": {
-        "trend": "тренд продаж",
-        "anomaly": "необычный всплеск спроса",
-        "support": "базовый уровень продаж",
-        "resistance": "потолок продаж"
-    }
-}
-
 # Конфигурация директорий
 UPLOAD_DIR = "uploads"
 DATA_DIR = "data"
