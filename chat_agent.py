@@ -27,9 +27,8 @@ class ChatAgent:
         visual_max = dash_features.get("max_value", "неизвестно")
         main_metric = dash_features.get("main_metric", "неизвестный")
 
-        # Аномалии из LLM
-        anomalies = ts_llm.get("anomalies", [])
-        anomalies_str = ", ".join([f"{a['value']} на {a['date']}" for a in anomalies]) if anomalies else "не обнаружены"
+        # Аномалии из LLM (текстовое описание)
+        anomalies_description = ts_llm.get("anomalies_description", "Аномалии не обнаружены")
 
         # Формируем базовую аннотацию
         annotation = f"Дашборд отображает {main_metric} с {trend} трендом и {seasonality} сезонностью. "
@@ -37,24 +36,8 @@ class ChatAgent:
             annotation += f"Визуально максимальное значение {visual_max}, минимальное {visual_min}. "
         if math_max != "неизвестно" or math_min != "неизвестно":
             annotation += f"По данным, максимум {math_max}, минимум {math_min}. "
-        if anomalies_str != "не обнаружены":
-            annotation += f"Обнаружены аномалии: {anomalies_str}. "
-
-        # Запрос к LLM для предположения о причинах аномалий
-        if anomalies:
-            prompt = ChatPromptTemplate.from_template(
-                """На основе данных временного ряда были обнаружены аномалии: {anomalies}.
-                Сделай краткое предположение (1-2 предложения) о возможных причинах этих аномалий в контексте финансовой области.
-                Укажи, что это предположение, и избегай конкретных утверждений."""
-            )
-            chain = prompt | llm | StrOutputParser()
-            try:
-                anomalies_context = json.dumps(anomalies)
-                hypothesis = chain.invoke({"anomalies": anomalies_context})
-                annotation += f"Предположительно, аномалии могут быть связаны с {hypothesis.lower().rstrip('.')}. "
-            except Exception as e:
-                logger.error(f"Ошибка при генерации гипотезы для аномалий: {str(e)}")
-                annotation += "Причины аномалий неизвестны. "
+        if anomalies_description != "Аномалии не обнаружены":
+            annotation += f"{anomalies_description} "
 
         # Удаляем лишние пробелы и возвращаем аннотацию
         annotation = " ".join(annotation.split())
@@ -62,14 +45,14 @@ class ChatAgent:
         return annotation
 
     def review_annotation(self, annotation: str, ts_features: Dict, dash_features: Dict) -> str:
-        """Проверяет и улучшает аннотацию на естественность и согласованность."""
+        """Проверяет и улучшает аннотацию на есте complements and consistency."""
         prompt = ChatPromptTemplate.from_template(
             """Проверь аннотацию на естественность, краткость и согласованность с данными:
             Аннотация: {annotation}
             Характеристики временного ряда: {ts_features}
             Характеристики дашборда: {dash_features}
             Убедись, что аннотация звучит естественно, как текст для человека, и не содержит противоречий.
-            Верни улучшенную версию аннотации, сохраняя краткость."""
+            Верни улучшенную версию аннотации, сохраняя краткость, БЕЗ ПОДПУНКТОВ одним абзацем!"""
         )
         chain = prompt | llm | StrOutputParser()
         try:
