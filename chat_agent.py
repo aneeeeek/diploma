@@ -22,9 +22,7 @@ class ChatAgent:
         math_min = ts_math.get("min_value", "неизвестно")
         math_max = ts_math.get("max_value", "неизвестно")
 
-        # Визуальные максимум и минимум из дашборда
-        visual_min = dash_features.get("min_value", "неизвестно")
-        visual_max = dash_features.get("max_value", "неизвестно")
+        # Метрика из дашборда
         main_metric = dash_features.get("main_metric", "неизвестный")
 
         # Аномалии из LLM (текстовое описание)
@@ -32,8 +30,6 @@ class ChatAgent:
 
         # Формируем базовую аннотацию
         annotation = f"Дашборд отображает {main_metric} с {trend} трендом и {seasonality} сезонностью. "
-        if visual_max != "неизвестно" or visual_min != "неизвестно":
-            annotation += f"Визуально максимальное значение {visual_max}, минимальное {visual_min}. "
         if math_max != "неизвестно" or math_min != "неизвестно":
             annotation += f"По данным, максимум {math_max}, минимум {math_min}. "
         if anomalies_description != "Аномалии не обнаружены":
@@ -45,12 +41,12 @@ class ChatAgent:
         return annotation
 
     def review_annotation(self, annotation: str, ts_features: Dict, dash_features: Dict) -> str:
-        """Проверяет и улучшает аннотацию на есте complements and consistency."""
+        """Проверяет и улучшает аннотацию на естественность и согласованность."""
         prompt = ChatPromptTemplate.from_template(
             """Проверь аннотацию на естественность, краткость и согласованность с данными:
             Аннотация: {annotation}
             Характеристики временного ряда: {ts_features}
-            Характеристики дашборда: {dash_features}
+            Метрика дашборда: {dash_features}
             Убедись, что аннотация звучит естественно, как текст для человека, и не содержит противоречий.
             Верни улучшенную версию аннотации, сохраняя краткость, БЕЗ ПОДПУНКТОВ одним абзацем!"""
         )
