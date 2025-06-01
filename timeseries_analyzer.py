@@ -1,12 +1,15 @@
 import pandas as pd
 from pathlib import Path
 from typing import Optional, Tuple, Dict
-from config import logger, client
+from config import logger, client, llm
 import json
 import re
 import base64
 import tempfile
 import os
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+
 
 class TimeSeriesAnalyzer:
     def read_data(self, file_path: Path) -> Tuple[Optional[pd.DataFrame], str]:
@@ -260,3 +263,34 @@ class TimeSeriesAnalyzer:
                 logger.info(f"Временный файл удален: {temp_file_path}")
             except Exception as e:
                 logger.error(f"Ошибка при удалении временного файла {temp_file_path}: {str(e)}")
+
+    def query_timeseries(self, query: str, data_path: Optional[str], context: str) -> str:
+        """Обрабатывает запрос пользователя, связанный с характеристиками временного ряда."""
+        if not data_path:
+            return "неизвестно"
+
+        prompt = ChatPromptTemplate.from_template(
+            """Ты аналитик временных рядов. Твоя роль — анализировать тренды, сезонность, аномалии и другие характеристики временного ряда.
+            Запрос пользователя: {query}
+            Контекст: {context}
+            Ответь на вопрос, если он связан с характеристиками временного ряда (например, тренды, сезонность, аномалии, минимум/максимум).
+            Используй термины, специфичные для финансовой области, если применимо.
+            Если вопрос не относится к твоей роли, верни "неизвестно".
+            Верни ответ кратко, одним-двумя предложениями."""
+        )
+
+        chain = prompt | llm | StrOutputParser()
+
+        try:
+            df, _ = self.read_data(Path(data_path))
+            if df is None:
+                return "неизвестно"
+            response = chain.invoke({
+                "query": query,
+                "context": context
+            })
+            logger.info(f"Ответ Timeseries Agent: {response}")
+            return response
+        except Exception as e:
+            logger.error(f"Ошибка Timeseries Agent: {str(e)}")
+            return "неизвестно"

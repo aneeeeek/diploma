@@ -67,7 +67,7 @@ def create_graph():
 
     # Узел для генерации аннотации
     def generate_annotation(state: AgentState) -> AgentState:
-        if state["ts_features"]:
+        if state["ts_features"] and not state["user_query"]:
             state["final_annotation"] = chat_agent.generate_general_annotation(state["ts_features"])
         return state
 
@@ -94,10 +94,7 @@ def create_graph():
     graph.add_edge("analyze_dashboard", "analyze_domain")
     graph.add_edge("analyze_domain", "analyze_timeseries")
     graph.add_edge("analyze_timeseries", "generate_annotation")
-    graph.add_edge("generate_annotation", END)
-    graph.add_conditional_edges(
-        "process_query",
-        lambda state: END if state["response"] else "process_query"
-    )
+    graph.add_edge("generate_annotation", "process_query")
+    graph.add_edge("process_query", END)
 
     return graph.compile()

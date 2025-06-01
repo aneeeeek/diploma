@@ -3,8 +3,11 @@ import json
 import re
 import pandas as pd
 from pathlib import Path
-from config import client, logger
+from config import client, logger, llm
 from typing import Optional
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+
 
 class DomainSpecificAnalyzer:
     def __init__(self, default_domain: str = ""):
@@ -65,13 +68,13 @@ class DomainSpecificAnalyzer:
             logger.warning("Отсутствуют данные и изображение, возвращается default_domain")
             return {"domain": self.default_domain}
         prompt = f"""Ты аналитик данных. На основе изображения дашборда и данных временного ряда определи область применения дашборда.
-Извлеки контекст из полученных данных, а именно область применения дашборда (например, финансы, экономика, криптовалюта, медицина, политика, компьютерные вычисления и прочее, что можешь распознать).
-Изображение в base64: {base64_image if base64_image else 'отсутствует'}
-Данные в CSV (base64): {base64_data if base64_data else 'отсутствуют'}
-Верни результат в формате JSON с полем "domain" (например, {{"domain": "Заболевания"}}).
-Ответ должен быть заключен в ```json ```.
-Инструкция: Декодируй base64, проанализируй данные и изображение, выбери наиболее подходящую область.
-"""
+        Извлеки контекст из полученных данных, а именно область применения дашборда (например, финансы, экономика, криптовалюта, медицина, политика, компьютерные вычисления и прочее, что можешь распознать).
+        Изображение в base64: {base64_image if base64_image else 'отсутствует'}
+        Данные в CSV (base64): {base64_data if base64_data else 'отсутствуют'}
+        Верни результат в формате JSON с полем "domain" (например, {{"domain": "Заболевания"}}).
+        Ответ должен быть заключен в ```json ```.
+        Инструкция: Декодируй base64, проанализируй данные и изображение, выбери наиболее подходящую область.
+        """
         logger.info(f"Длина промпта: {len(prompt)} символов")
         try:
             response = client.chat.completions.create(
@@ -109,3 +112,28 @@ class DomainSpecificAnalyzer:
             if "413" in str(e) or "request too large" in str(e).lower():
                 return {"domain": self.default_domain, "error": "Слишком большой объем данных или изображения. Пожалуйста, уменьшите размер файла."}
             return {"domain": self.default_domain, "error": f"Ошибка анализа: {str(e)}"}
+
+    def query_domain(self, query: str, image_path: Optional[str], data_path: Optional[str], context: str) -> str:
+        """Обрабатывает запрос пользователя, связанный с областью применения дашборда."""
+        prompt = ChatPromptTemplate.from_template(
+            """Ты аналитик данных, специализирующийся на определении области применения дашборда.
+            Запрос пользователя: {query}
+            Контекст: {context}
+            Ответь на вопрос, если он связан с областью применения дашборда (например, финансы, медицина, экономика).
+            Используй термины, специфичные для финансовой области, если применимо.
+            Если вопрос не относится к твоей роли, верни "неизвестно".
+            Верни ответ кратко, одним-двумя предложениями."""
+        )
+
+        chain = prompt | llm | StrOutputParser()
+
+        try:
+            response = chain.invoke({
+                "query": query,
+                "context": context
+            })
+            logger.info(f"Ответ Domain Agent: {response}")
+            return response
+        except Exception as e:
+            logger.error(f"Ошибка Domain Agent: {str(e)}")
+            return "неизвестно"

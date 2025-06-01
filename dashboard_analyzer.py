@@ -1,7 +1,12 @@
 import json
 import base64
 import re
-from config import client, logger
+from typing import Optional
+
+from config import client, logger, llm
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+
 
 class DashboardAnalyzer:
     def encode_image(self, image_path: str) -> str:
@@ -25,14 +30,12 @@ class DashboardAnalyzer:
 
     def analyze_dashboard(self, image_path: str) -> dict:
         """Анализирует изображение дашборда, извлекая только основную метрику."""
-        # Кодируем изображение
         try:
             base64_image = self.encode_image(image_path)
         except Exception as e:
             logger.error(f"Не удалось закодировать изображение: {str(e)}")
             return {"main_metric": "неизвестно"}
 
-        # Формируем промпт для извлечения только метрики
         prompt = """Ты успешный аналитик данных. Проанализируй изображение дашборда, содержащее временной ряд. 
         Извлеки из графика основную метрику/показатель у временного ряда (например, "Продажи золота", "Выручка", "Объем производства"). 
         Сформулируй понятно для человека, на русском языке. Будь внимателен, может быть такое, что метрика указана в названии графика или в легенде.
@@ -42,7 +45,6 @@ class DashboardAnalyzer:
         """
 
         try:
-            # Отправляем запрос с текстом и изображением
             response = client.chat.completions.create(
                 model="aimediator.gpt-4.1-mini",
                 messages=[
@@ -64,11 +66,9 @@ class DashboardAnalyzer:
                 stream=False
             )
             content = response.choices[0].message.content
-            # Извлекаем JSON из markdown
             json_content = self.extract_json_from_markdown(content)
 
             try:
-                # Пробуем распарсить JSON
                 result = json.loads(json_content)
                 if "main_metric" not in result:
                     logger.error(f"Поле main_metric отсутствует в ответе: {json_content}")
@@ -81,3 +81,32 @@ class DashboardAnalyzer:
         except Exception as e:
             logger.error(f"Ошибка анализа изображения дашборда: {str(e)}")
             return {"main_metric": "неизвестно"}
+
+    def query_dashboard(self, query: str, image_path: Optional[str], context: str) -> str:
+        """Обрабатывает запрос пользователя, связанный с визуальными элементами дашборда."""
+        if not image_path:
+            return "неизвестно"
+
+        prompt = ChatPromptTemplate.from_template(
+            """Ты аналитик дашбордов. Твоя роль — анализировать визуальные элементы дашборда (графики, метрики, подписи).
+            Запрос пользователя: {query}
+            Контекст: {context}
+            Ответь на вопрос, если он связан с визуальными элементами дашборда (например, метрика, название графика, легенда).
+            Используй термины, специфичные для финансовой области, если применимо.
+            Если вопрос не относится к твоей роли, верни "неизвестно".
+            Верни ответ кратко, одним-двумя предложениями."""
+        )
+
+        chain = prompt | llm | StrOutputParser()
+
+        try:
+            base64_image = self.encode_image(image_path)
+            response = chain.invoke({
+                "query": query,
+                "context": context
+            })
+            logger.info(f"Ответ Dashboard Agent: {response}")
+            return response
+        except Exception as e:
+            logger.error(f"Ошибка Dashboard Agent: {str(e)}")
+            return "неизвестно"
