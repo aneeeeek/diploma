@@ -9,28 +9,21 @@ from config import UPLOAD_DIR, DATA_DIR, logger
 import asyncio
 from graph_workflow import AgentState, create_graph
 
-# Вызов функции настройки страницы как первой команды
 set_page_config()
 
-# Функция для создания директорий
 def initialize_directories():
     Path(UPLOAD_DIR).mkdir(exist_ok=True)
     Path(DATA_DIR).mkdir(exist_ok=True)
 
-# Инициализация директорий
 initialize_directories()
 
-# Инициализация графа
 graph = create_graph()
 
-# Callback-функции для интерфейса
 def get_current_file(directory):
-    """Получает текущий загруженный файл в указанной директории."""
     files = os.listdir(directory)
     return files[0] if files else None
 
 def read_data_preview(file_path):
-    """Читает первые 5 строк из файла данных для предварительного просмотра."""
     if file_path.endswith('.csv'):
         df = pd.read_csv(file_path, nrows=5)
         return df
@@ -44,7 +37,6 @@ def read_data_preview(file_path):
     return ""
 
 def clear_directory(directory):
-    """Очищает указанную директорию от всех файлов."""
     for filename in os.listdir(directory):
         file_path = os.path.join(directory, filename)
         try:
@@ -96,15 +88,12 @@ def display_data_callback(current_data):
         st.info("Данные не загружены")
 
 async def run_graph(state):
-    """Запускает граф асинхронно."""
     return await graph.ainvoke(state)
 
 def chat_callback(chat_container):
-    # Инициализация состояния чата
     if 'chat_history' not in st.session_state:
         st.session_state.chat_history = []
 
-    # Автоматический анализ при наличии обоих файлов
     if get_current_file(UPLOAD_DIR) and get_current_file(DATA_DIR):
         image_path = os.path.join(UPLOAD_DIR, get_current_file(UPLOAD_DIR))
         data_path = os.path.join(DATA_DIR, get_current_file(DATA_DIR))
@@ -122,18 +111,19 @@ def chat_callback(chat_container):
             )
             result = asyncio.run(run_graph(state))
             if result["final_annotation"]:
-                st.session_state.chat_history.append(
-                    {"role": "assistant", "content": result["final_annotation"]}
-                )
-                logger.info(f"Создана начальная аннотация: {result['final_annotation']}")
+                if "Слишком большой объем" in result["final_annotation"]:
+                    st.error(result["final_annotation"])
+                else:
+                    st.session_state.chat_history.append(
+                        {"role": "assistant", "content": result["final_annotation"]}
+                    )
+                    logger.info(f"Создана начальная аннотация: {result['final_annotation']}")
 
-    # Отображение истории чата
     with chat_container:
         for message in st.session_state.chat_history:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
 
-    # Ввод пользователя
     user_input = st.chat_input("Задайте вопрос о дашборде...")
     if user_input:
         st.session_state.chat_history.append({"role": "user", "content": user_input})
@@ -152,12 +142,14 @@ def chat_callback(chat_container):
         )
         result = asyncio.run(run_graph(state))
         if result["response"]:
-            st.session_state.chat_history.append(
-                {"role": "assistant", "content": result["response"]}
-            )
+            if "Слишком большой объем" in result["response"]:
+                st.error(result["response"])
+            else:
+                st.session_state.chat_history.append(
+                    {"role": "assistant", "content": result["response"]}
+                )
         st.rerun()
 
-# Настройка пользовательского интерфейса
 setup_interface(
     upload_image_callback=upload_image_callback,
     upload_data_callback=upload_data_callback,

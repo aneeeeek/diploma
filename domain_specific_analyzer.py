@@ -9,8 +9,6 @@ from typing import Optional
 class DomainSpecificAnalyzer:
     def __init__(self, default_domain: str = ""):
         self.default_domain = default_domain
-        self.max_rows = 100  # Ограничение на количество строк для CSV
-        self.max_base64_length = 50000  # Максимальная длина base64-строки
 
     def encode_image(self, image_path: str) -> str:
         """Кодирует изображение в формат base64."""
@@ -18,35 +16,28 @@ class DomainSpecificAnalyzer:
             with open(image_path, "rb") as image_file:
                 encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
                 logger.info(f"Изображение {image_path} закодировано, длина: {len(encoded_string)}")
-                if len(encoded_string) > self.max_base64_length:
-                    logger.warning(f"Размер base64 изображения превышает {self.max_base64_length}, пропускается")
-                    return ""
                 return encoded_string
         except Exception as e:
             logger.error(f"Ошибка при кодировании изображения {image_path}: {str(e)}")
-            return ""
+            return f"Ошибка: Не удалось закодировать изображение: {str(e)}"
 
     def encode_data(self, data_path: Path) -> str:
-        """Читает данные и кодирует их в CSV в формате base64, ограничивая количество строк."""
+        """Читает данные и кодирует их в CSV в формате base64."""
         try:
             if data_path.suffix == '.csv':
-                df = pd.read_csv(data_path, nrows=self.max_rows)
+                df = pd.read_csv(data_path)
             elif data_path.suffix in ['.xlsx', '.xls']:
-                df = pd.read_excel(data_path, engine='openpyxl', nrows=self.max_rows)
+                df = pd.read_excel(data_path, engine='openpyxl')
             else:
                 logger.error(f"Неподдерживаемый формат файла: {data_path.suffix}")
-                return ""
-            # Преобразуем в CSV и кодируем в base64
+                return f"Ошибка: Неподдерживаемый формат файла: {data_path.suffix}"
             csv_buffer = df.to_csv(index=False)
             encoded_csv = base64.b64encode(csv_buffer.encode("utf-8")).decode("utf-8")
             logger.info(f"Данные {data_path} закодированы, длина: {len(encoded_csv)}")
-            if len(encoded_csv) > self.max_base64_length:
-                logger.warning(f"Размер base64 данных превышает {self.max_base64_length}, пропускается")
-                return ""
             return encoded_csv
         except Exception as e:
             logger.error(f"Ошибка при кодировании данных {data_path}: {str(e)}")
-            return ""
+            return f"Ошибка: Не удалось закодировать данные: {str(e)}"
 
     def extract_text_from_response(self, content: str) -> str:
         """Извлекает домен из ответа LLM, удаляя markdown, если он есть."""
@@ -68,14 +59,11 @@ class DomainSpecificAnalyzer:
 
     def suggest_domain(self, image_path: Optional[str], data_path: Optional[str]) -> dict:
         """Определяет область дашборда на основе изображения и данных, возвращая JSON."""
-        # Подготовка данных
         base64_image = self.encode_image(image_path) if image_path else ""
         base64_data = self.encode_data(Path(data_path)) if data_path else ""
-        # Проверка, есть ли хотя бы один источник данных
         if not base64_image and not base64_data:
             logger.warning("Отсутствуют данные и изображение, возвращается default_domain")
             return {"domain": self.default_domain}
-        # Формируем промпт
         prompt = f"""Ты аналитик данных. На основе изображения дашборда и данных временного ряда определи область применения дашборда.
 Извлеки контекст из полученных данных, а именно область применения дашборда (например, финансы, экономика, криптовалюта, медицина, политика, компьютерные вычисления и прочее, что можешь распознать).
 Изображение в base64: {base64_image if base64_image else 'отсутствует'}
@@ -84,14 +72,8 @@ class DomainSpecificAnalyzer:
 Ответ должен быть заключен в ```json ```.
 Инструкция: Декодируй base64, проанализируй данные и изображение, выбери наиболее подходящую область.
 """
-        # Проверка длины промпта
-        prompt_length = len(prompt)
-        logger.info(f"Длина промпта: {prompt_length} символов")
-        if prompt_length > 100000:
-            logger.error(f"Промпт слишком длинный ({prompt_length} символов), возвращается default_domain")
-            return {"domain": self.default_domain}
+        logger.info(f"Длина промпта: {len(prompt)} символов")
         try:
-            # Отправляем запрос к LLM
             response = client.chat.completions.create(
                 model="aimediator.gpt-4.1-mini",
                 messages=[
@@ -104,7 +86,7 @@ class DomainSpecificAnalyzer:
                                 "image_url": {
                                     "url": f"data:image/jpeg;base64,{base64_image}"
                                 }
-                            } if base64_image else {"type": "text", "text": "Изображение отсутствует"}
+                            } if base64_image and not base64_image.startswith("Ошибка") else {"type": "text", "text": "Изображение отсутствует"}
                         ]
                     }
                 ],
@@ -120,18 +102,10 @@ class DomainSpecificAnalyzer:
                 logger.error("Пустое содержимое ответа от LLM")
                 return {"domain": self.default_domain}
             logger.info(f"Ответ LLM для определения области: {content}")
-            # Извлекаем домен из ответа
             json_content = self.extract_text_from_response(content)
             return {"domain": json_content}
         except Exception as e:
             logger.error(f"Ошибка при обращении к LLM: {str(e)}")
-            return {"domain": self.default_domain}
-
-    def adapt_to_domain(self, annotation: str, image_path: Optional[str] = None, data_path: Optional[str] = None) -> str:
-        """Адаптирует аннотацию, добавляя название домена."""
-        domain_result = self.suggest_domain(image_path, data_path)
-        domain = domain_result.get("domain", self.default_domain)
-        # Формируем итоговую аннотацию с указанием домена
-        result = f"Область дашборда: {domain}. {annotation}"
-        logger.info(f"Адаптированная аннотация: {result}")
-        return result
+            if "413" in str(e) or "request too large" in str(e).lower():
+                return {"domain": self.default_domain, "error": "Слишком большой объем данных или изображения. Пожалуйста, уменьшите размер файла."}
+            return {"domain": self.default_domain, "error": f"Ошибка анализа: {str(e)}"}

@@ -15,7 +15,6 @@ class TimeSeriesAnalyzer:
             if file_path.suffix == '.csv':
                 df = pd.read_csv(file_path)
                 logger.info(f"CSV файл прочитан: {file_path}, размер: {df.shape}, колонки: {df.columns.tolist()}")
-                # Логируем типы данных колонок
                 logger.info(f"Типы данных колонок:\n{df.dtypes}")
             elif file_path.suffix in ['.xlsx', '.xls']:
                 xls = pd.ExcelFile(file_path, engine='openpyxl')
@@ -41,32 +40,24 @@ class TimeSeriesAnalyzer:
             with open(image_path, "rb") as image_file:
                 encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
                 logger.info(f"Изображение {image_path} закодировано, длина: {len(encoded_string)}")
-                if len(encoded_string) > 500000:  # Ограничение длины base64
-                    logger.warning(f"Размер base64 изображения превышает 500000, пропускается")
-                    return ""
                 return encoded_string
         except Exception as e:
             logger.error(f"Ошибка при кодировании изображения {image_path}: {str(e)}")
-            return ""
+            return f"Ошибка: Не удалось закодировать изображение: {str(e)}"
 
     def encode_data(self, df: pd.DataFrame) -> str:
         """Кодирует данные DataFrame в CSV в формате base64."""
         try:
-            # Преобразуем в CSV и кодируем в base64 без ограничения строк
             csv_buffer = df.to_csv(index=False)
             encoded_csv = base64.b64encode(csv_buffer.encode("utf-8")).decode("utf-8")
             logger.info(f"Данные закодированы, длина: {len(encoded_csv)}")
-            if len(encoded_csv) > 500000:  # Ограничение длины base64
-                logger.warning(f"Размер base64 данных превышает 500000, обрезается")
-                return encoded_csv[:500000]  # Обрезаем до допустимого размера
             return encoded_csv
         except Exception as e:
             logger.error(f"Ошибка при кодировании данных: {str(e)}")
-            return ""
+            return f"Ошибка: Не удалось закодировать данные: {str(e)}"
 
     def analyze_time_series(self, df: pd.DataFrame, image_path: Optional[str], main_metric: str, domain: str) -> Dict:
         """Анализирует временной ряд с учетом изображения, данных, метрики и домена."""
-        # Проверяем, что есть числовые колонки
         numeric_cols = df.select_dtypes(include=['number']).columns
         if len(numeric_cols) == 0:
             logger.error("Числовые столбцы в таблице данных не найдены")
@@ -81,7 +72,6 @@ class TimeSeriesAnalyzer:
                 "hypotheses": "Данные отсутствуют"
             }
 
-        # Выбираем числовую колонку (предполагаем, что это вторая колонка, а не первая)
         date_col_name = df.columns[0]
         numeric_cols = [col for col in numeric_cols if col != date_col_name]
         if not numeric_cols:
@@ -99,24 +89,18 @@ class TimeSeriesAnalyzer:
         col = numeric_cols[0]
         logger.info(f"Выбрана числовая колонка для значений: {col}")
 
-        # Проверяем первую колонку на даты
         try:
-            # Проверяем тип данных
             if pd.api.types.is_numeric_dtype(df[date_col_name]):
-                # Если это числа (например, годы), преобразуем в даты
                 df[date_col_name] = pd.to_datetime(df[date_col_name].astype(int).astype(str) + '-01-01', errors='coerce')
                 logger.info(f"Колонка {date_col_name} преобразована в datetime")
             elif df[date_col_name].dtype == 'object':
-                # Проверяем на нестандартный формат "Занлись \d+"
                 if df[date_col_name].str.match(r'Занлись \d+').any():
                     df[date_col_name] = df[date_col_name].str.extract(r'Занлись (\d+)').astype(float).astype(int) + 1945
                     df[date_col_name] = pd.to_datetime(df[date_col_name].astype(str) + '-01-01')
                     logger.info(f"Колонка {date_col_name} преобразована из формата 'Занлись \d+' в datetime")
                 else:
-                    # Пробуем преобразовать в даты
                     df[date_col_name] = pd.to_datetime(df[date_col_name], errors='coerce')
                     logger.info(f"Колонка {date_col_name} преобразована в datetime (попытка автопреобразования)")
-            # Проверяем, что колонка действительно стала datetime
             if pd.api.types.is_datetime64_any_dtype(df[date_col_name]):
                 date_col = df[date_col_name]
                 logger.info(f"Колонка {date_col_name} успешно установлена как date_col с типом datetime")
@@ -127,7 +111,6 @@ class TimeSeriesAnalyzer:
             logger.error(f"Ошибка при преобразовании даты {date_col_name}: {str(e)}")
             date_col = None
 
-        # Подготовка данных для временного ряда
         def format_date_for_human(date):
             if pd.isna(date):
                 return "неизвестно"
@@ -146,30 +129,23 @@ class TimeSeriesAnalyzer:
             "Значение": [round(float(row[col]), 2) if pd.notna(row[col]) else 0.0 for _, row in df.iterrows()]
         })
 
-        # Математический расчёт минимума и максимума
         min_value = temp_df["Значение"].min()
         max_value = temp_df["Значение"].max()
         min_date = temp_df.loc[temp_df["Значение"].idxmin(), "Дата"]
         max_date = temp_df.loc[temp_df["Значение"].idxmax(), "Дата"]
         min_max_hint = f"Минимальное значение: {min_value} {min_date}, Максимальное значение: {max_value} {max_date}"
 
-        # Логируем данные для отладки
         logger.info(f"Первые 5 строк данных для LLM:\n{temp_df.head().to_string()}")
 
-        # Создаем временный CSV-файл
         with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8') as temp_file:
             temp_df.to_csv(temp_file.name, index=False)
             temp_file_path = temp_file.name
 
         try:
-            # Кодируем CSV-файл в base64
             encoded_csv = self.encode_data(temp_df)
             logger.info(f"CSV-файл закодирован в base64: {temp_file_path}")
-
-            # Кодируем изображение, если оно есть
             base64_image = self.encode_image(image_path) if image_path else ""
 
-            # Формируем промпт по частям
             prompt_parts = [
                 f"Дашборд в области {domain} показывает метрику {main_metric}.",
                 "Ты успешный аналитик временных рядов. Проанализируй временной ряд, представленный в CSV-файле (формат: Дата,Значение), закодированном в base64:",
@@ -193,22 +169,7 @@ class TimeSeriesAnalyzer:
             prompt = "\n".join(prompt_parts)
             logger.info(f"Полный промпт для LLM (первые 500 символов):\n{prompt[:500]}...")
 
-            # Проверяем длину промпта
-            if len(prompt) > 100000:
-                logger.error(f"Промпт слишком длинный ({len(prompt)} символов), возвращается ошибка")
-                return {
-                    "metric": main_metric,
-                    "domain": domain,
-                    "trend": "неизвестно",
-                    "seasonality": "неизвестно",
-                    "min_value": f"{min_value} {min_date}",
-                    "max_value": f"{max_value} {max_date}",
-                    "anomalies": [],
-                    "hypotheses": "Промпт слишком длинный"
-                }
-
             try:
-                # Отправляем запрос к LLM
                 response = client.chat.completions.create(
                     model="aimediator.gpt-4.1-mini",
                     messages=[
@@ -221,27 +182,25 @@ class TimeSeriesAnalyzer:
                                     "image_url": {
                                         "url": f"data:image/jpeg;base64,{base64_image}"
                                     }
-                                } if base64_image else {"type": "text", "text": "Изображение отсутствует"}
+                                } if base64_image and not base64_image.startswith("Ошибка") else {"type": "text", "text": "Изображение отсутствует"}
                             ]
                         }
                     ],
-                    max_tokens=1000,  # Увеличиваем для более подробного ответа
+                    max_tokens=1000,
                     temperature=0.5,
                     stream=False
                 )
                 content = response.choices[0].message.content
                 logger.info(f"Сырой ответ от LLM:\n{content}")
 
-                # Извлекаем JSON из markdown
                 json_pattern = r"```json\s*([\s\S]*?)\s*```"
                 match = re.search(json_pattern, content)
                 if match:
                     json_content = match.group(1).strip()
                     try:
                         result = json.loads(json_content)
-                        result["metric"] = main_metric  # Гарантируем, что метрика совпадает
-                        result["domain"] = domain  # Гарантируем, что домен совпадает
-                        # Проверяем и корректируем min_value и max_value, если они отличаются
+                        result["metric"] = main_metric
+                        result["domain"] = domain
                         if "min_value" in result and result["min_value"] != f"{min_value} {min_date}":
                             logger.warning(f"LLM изменил min_value: {result['min_value']} vs {min_value} {min_date}")
                         if "max_value" in result and result["max_value"] != f"{max_value} {max_date}":
@@ -274,6 +233,17 @@ class TimeSeriesAnalyzer:
                     }
             except Exception as e:
                 logger.error(f"Ошибка анализа временного ряда: {str(e)}")
+                if "413" in str(e) or "request too large" in str(e).lower():
+                    return {
+                        "metric": main_metric,
+                        "domain": domain,
+                        "trend": "неизвестно",
+                        "seasonality": "неизвестно",
+                        "min_value": f"{min_value} {min_date}",
+                        "max_value": f"{max_value} {max_date}",
+                        "anomalies": [],
+                        "hypotheses": "Слишком большой объем данных или изображения. Пожалуйста, уменьшите размер файла."
+                    }
                 return {
                     "metric": main_metric,
                     "domain": domain,
@@ -285,7 +255,6 @@ class TimeSeriesAnalyzer:
                     "hypotheses": f"Ошибка анализа: {str(e)}"
                 }
         finally:
-            # Удаляем временный файл
             try:
                 os.unlink(temp_file_path)
                 logger.info(f"Временный файл удален: {temp_file_path}")
