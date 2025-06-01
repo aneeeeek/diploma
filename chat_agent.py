@@ -5,48 +5,45 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 class ChatAgent:
-    def generate_general_annotation(self, ts_features: Dict, dash_features: Dict) -> str:
-        """Создает краткую аннотацию на естественном языке с приоритизацией информации."""
-        if "error" in dash_features or ("mathematical" not in ts_features and "llm" not in ts_features):
-            error_msg = f"Ошибка: Невозможно создать аннотацию из-за некорректных данных. Временной ряд: {ts_features.get('error', '')}, Дашборд: {dash_features.get('error', '')}"
+    def generate_general_annotation(self, ts_features: Dict) -> str:
+        """Создает краткую аннотацию на естественном языке из JSON временного ряда."""
+        if "error" in ts_features or not all(key in ts_features for key in ["metric", "domain", "trend", "seasonality"]):
+            error_msg = f"Ошибка: Некорректные данные временного ряда: {ts_features.get('error', 'Недостаточно данных')}"
             logger.error(error_msg)
             return error_msg
 
-        # Извлекаем данные с учетом приоритетов
-        ts_math = ts_features.get("mathematical", {})
-        ts_llm = ts_features.get("llm", {})
-
-        # Приоритет: математический анализ для тренда, сезонности, максимума и минимума
-        trend = ts_math.get("trend", "неизвестный")
-        seasonality = ts_math.get("seasonality", "неизвестно")
-        math_min = ts_math.get("min_value", "неизвестно")
-        math_max = ts_math.get("max_value", "неизвестно")
-
-        # Метрика из дашборда
-        main_metric = dash_features.get("main_metric", "неизвестный")
-
-        # Аномалии из LLM (текстовое описание)
-        anomalies_description = ts_llm.get("anomalies_description", "Аномалии не обнаружены")
+        # Извлекаем данные
+        metric = ts_features.get("metric", "неизвестно")
+        domain = ts_features.get("domain", "неизвестно")
+        trend = ts_features.get("trend", "неизвестно")
+        seasonality = ts_features.get("seasonality", "неизвестно")
+        min_value = ts_features.get("min_value", "неизвестно")
+        max_value = ts_features.get("max_value", "неизвестно")
+        anomalies = ts_features.get("anomalies", [])
+        hypotheses = ts_features.get("hypotheses", "Гипотезы отсутствуют")
 
         # Формируем базовую аннотацию
-        annotation = f"Дашборд отображает {main_metric} с {trend} трендом и {seasonality} сезонностью. "
-        if math_max != "неизвестно" or math_min != "неизвестно":
-            annotation += f"По данным, максимум {math_max}, минимум {math_min}. "
-        if anomalies_description != "Аномалии не обнаружены":
-            annotation += f"{anomalies_description} "
+        annotation = f"Дашборд отображает {metric} в области {domain}. {trend}. {seasonality}. "
+        if max_value != "неизвестно" or min_value != "неизвестно":
+            annotation += f"Максимум: {max_value}, минимум: {min_value}. "
+        if anomalies:
+            anomalies_text = ", ".join([f"{a['value']} на {a['date']}" for a in anomalies])
+            annotation += f"Обнаружены аномалии: {anomalies_text}. "
+        annotation += f"{hypotheses}"
 
-        # Удаляем лишние пробелы и возвращаем аннотацию
+        # Удаляем лишние пробелы
         annotation = " ".join(annotation.split())
         logger.info(f"Сгенерирована аннотация: {annotation}")
-        return annotation
 
-    def review_annotation(self, annotation: str, ts_features: Dict, dash_features: Dict) -> str:
+        # Проверяем и улучшаем аннотацию
+        return self.review_annotation(annotation, ts_features)
+
+    def review_annotation(self, annotation: str, ts_features: Dict) -> str:
         """Проверяет и улучшает аннотацию на естественность и согласованность."""
         prompt = ChatPromptTemplate.from_template(
             """Проверь аннотацию на естественность, краткость и согласованность с данными:
             Аннотация: {annotation}
             Характеристики временного ряда: {ts_features}
-            Метрика дашборда: {dash_features}
             Убедись, что аннотация звучит естественно, как текст для человека, и не содержит противоречий.
             Верни улучшенную версию аннотации, сохраняя краткость, БЕЗ ПОДПУНКТОВ одним абзацем!"""
         )
@@ -54,8 +51,7 @@ class ChatAgent:
         try:
             response = chain.invoke({
                 "annotation": annotation,
-                "ts_features": json.dumps(ts_features),
-                "dash_features": json.dumps(dash_features)
+                "ts_features": json.dumps(ts_features)
             })
             logger.info(f"Улучшенная аннотация: {response}")
             return response

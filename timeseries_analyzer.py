@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 from pathlib import Path
 from typing import Optional, Tuple, Dict
 from config import logger, client
@@ -15,7 +14,9 @@ class TimeSeriesAnalyzer:
         try:
             if file_path.suffix == '.csv':
                 df = pd.read_csv(file_path)
-                logger.info(f"CSV файл прочитан: {file_path}, размер: {df.shape}")
+                logger.info(f"CSV файл прочитан: {file_path}, размер: {df.shape}, колонки: {df.columns.tolist()}")
+                # Логируем типы данных колонок
+                logger.info(f"Типы данных колонок:\n{df.dtypes}")
             elif file_path.suffix in ['.xlsx', '.xls']:
                 xls = pd.ExcelFile(file_path, engine='openpyxl')
                 for sheet_name in xls.sheet_names:
@@ -34,63 +35,125 @@ class TimeSeriesAnalyzer:
             logger.error(f"Ошибка чтения {file_path}: {str(e)}")
             return None, f"Ошибка чтения файла: {str(e)}"
 
-    def analyze_time_series_mathematical(self, df: pd.DataFrame) -> Dict:
-        """Анализирует временной ряд математически и извлекает ключевые характеристики."""
-        features = {}
-        numeric_cols = df.select_dtypes(include=['number']).columns
+    def encode_image(self, image_path: str) -> str:
+        """Кодирует изображение в формат base64."""
+        try:
+            with open(image_path, "rb") as image_file:
+                encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
+                logger.info(f"Изображение {image_path} закодировано, длина: {len(encoded_string)}")
+                if len(encoded_string) > 500000:  # Ограничение длины base64
+                    logger.warning(f"Размер base64 изображения превышает 500000, пропускается")
+                    return ""
+                return encoded_string
+        except Exception as e:
+            logger.error(f"Ошибка при кодировании изображения {image_path}: {str(e)}")
+            return ""
 
-        if len(numeric_cols) == 0:
-            logger.error("Числовые столбцы в таблице данных не найдены")
-            return {"error": "Числовые столбцы не найдены"}
+    def encode_data(self, df: pd.DataFrame) -> str:
+        """Кодирует данные DataFrame в CSV в формате base64."""
+        try:
+            # Преобразуем в CSV и кодируем в base64 без ограничения строк
+            csv_buffer = df.to_csv(index=False)
+            encoded_csv = base64.b64encode(csv_buffer.encode("utf-8")).decode("utf-8")
+            logger.info(f"Данные закодированы, длина: {len(encoded_csv)}")
+            if len(encoded_csv) > 500000:  # Ограничение длины base64
+                logger.warning(f"Размер base64 данных превышает 500000, обрезается")
+                return encoded_csv[:500000]  # Обрезаем до допустимого размера
+            return encoded_csv
+        except Exception as e:
+            logger.error(f"Ошибка при кодировании данных: {str(e)}")
+            return ""
 
-        col = numeric_cols[0]
-        data = df[col]
-
-        # Определение тренда
-        trend = np.polyfit(range(len(data)), data, 1)[0]
-        features["trend"] = "восходящий" if trend > 0 else "нисходящий" if trend < 0 else "стабильный"
-
-        # Определение сезонности
-        autocorr = data.autocorr(lag=1)
-        features["seasonality"] = "присутствует" if abs(autocorr) > 0.3 else "не обнаружена"
-
-        # Определение аномалий с датами
-        q1 = data.quantile(0.25)
-        q3 = data.quantile(0.75)
-        iqr = q3 - q1
-        lower_bound = q1 - 1.5 * iqr
-        upper_bound = q3 + 1.5 * iqr
-        anomalies = data[(data < lower_bound) | (data > upper_bound)]
-
-        # Проверяем наличие столбца с датами (предполагаем, что это первый столбец)
-        date_col = df.columns[0] if len(df.columns) > 1 and pd.api.types.is_datetime64_any_dtype(df[df.columns[0]]) else None
-        anomalies_list = []
-        if len(anomalies) > 0:
-            for idx in anomalies.index:
-                value = anomalies.loc[idx]
-                date = df.loc[idx, date_col].strftime('%Y-%m-%d') if date_col else "неизвестно"
-                anomalies_list.append({"value": round(float(value), 2), "date": date})
-        features["anomalies"] = anomalies_list
-
-        logger.info(f"Характеристики временного ряда (математический): {features}")
-        return features
-
-    def analyze_time_series_llm(self, df: pd.DataFrame) -> Dict:
-        """Анализирует временной ряд с помощью LLM, передавая данные как CSV-файл в base64."""
+    def analyze_time_series(self, df: pd.DataFrame, image_path: Optional[str], main_metric: str, domain: str) -> Dict:
+        """Анализирует временной ряд с учетом изображения, данных, метрики и домена."""
+        # Проверяем, что есть числовые колонки
         numeric_cols = df.select_dtypes(include=['number']).columns
         if len(numeric_cols) == 0:
             logger.error("Числовые столбцы в таблице данных не найдены")
-            return {"error": "Числовые столбцы не найдены"}
+            return {
+                "metric": main_metric,
+                "domain": domain,
+                "trend": "неизвестно",
+                "seasonality": "неизвестно",
+                "min_value": "неизвестно",
+                "max_value": "неизвестно",
+                "anomalies": [],
+                "hypotheses": "Данные отсутствуют"
+            }
 
-        # Подготовка данных для сохранения в CSV
+        # Выбираем числовую колонку (предполагаем, что это вторая колонка, а не первая)
+        date_col_name = df.columns[0]
+        numeric_cols = [col for col in numeric_cols if col != date_col_name]
+        if not numeric_cols:
+            logger.error("Числовые столбцы для значений не найдены (исключая колонку с датами)")
+            return {
+                "metric": main_metric,
+                "domain": domain,
+                "trend": "неизвестно",
+                "seasonality": "неизвестно",
+                "min_value": "неизвестно",
+                "max_value": "неизвестно",
+                "anomalies": [],
+                "hypotheses": "Числовые данные отсутствуют"
+            }
         col = numeric_cols[0]
-        date_col = df.columns[0] if len(df.columns) > 1 and pd.api.types.is_datetime64_any_dtype(df[df.columns[0]]) else None
+        logger.info(f"Выбрана числовая колонка для значений: {col}")
+
+        # Проверяем первую колонку на даты
+        try:
+            # Проверяем тип данных
+            if pd.api.types.is_numeric_dtype(df[date_col_name]):
+                # Если это числа (например, годы), преобразуем в даты
+                df[date_col_name] = pd.to_datetime(df[date_col_name].astype(int).astype(str) + '-01-01', errors='coerce')
+                logger.info(f"Колонка {date_col_name} преобразована в datetime")
+            elif df[date_col_name].dtype == 'object':
+                # Проверяем на нестандартный формат "Занлись \d+"
+                if df[date_col_name].str.match(r'Занлись \d+').any():
+                    df[date_col_name] = df[date_col_name].str.extract(r'Занлись (\d+)').astype(float).astype(int) + 1945
+                    df[date_col_name] = pd.to_datetime(df[date_col_name].astype(str) + '-01-01')
+                    logger.info(f"Колонка {date_col_name} преобразована из формата 'Занлись \d+' в datetime")
+                else:
+                    # Пробуем преобразовать в даты
+                    df[date_col_name] = pd.to_datetime(df[date_col_name], errors='coerce')
+                    logger.info(f"Колонка {date_col_name} преобразована в datetime (попытка автопреобразования)")
+            # Проверяем, что колонка действительно стала datetime
+            if pd.api.types.is_datetime64_any_dtype(df[date_col_name]):
+                date_col = df[date_col_name]
+                logger.info(f"Колонка {date_col_name} успешно установлена как date_col с типом datetime")
+            else:
+                date_col = None
+                logger.warning(f"Колонка {date_col_name} не является datetime после преобразования")
+        except Exception as e:
+            logger.error(f"Ошибка при преобразовании даты {date_col_name}: {str(e)}")
+            date_col = None
+
+        # Подготовка данных для временного ряда
+        def format_date_for_human(date):
+            if pd.isna(date):
+                return "неизвестно"
+            if isinstance(date, str):
+                return date
+            year = date.year
+            month = date.month
+            day = date.day
+            if month == 1 and day == 1:
+                return f"в {year} году" if "min" in context or "max" in context else f"на {year} год"
+            return f"на {day} {'января' if month == 1 else 'февраля' if month == 2 else 'марта' if month == 3 else 'апреля' if month == 4 else 'мая' if month == 5 else 'июня' if month == 6 else 'июля' if month == 7 else 'августа' if month == 8 else 'сентября' if month == 9 else 'октября' if month == 10 else 'ноября' if month == 11 else 'декабря'} {year} года"
+
+        context = {}
         temp_df = pd.DataFrame({
-            "Дата": [row[date_col].strftime('%Y-%m-%d') if date_col else f"Запись {idx}" for idx, row in df.iterrows()],
-            "Значение": [round(float(row[col]), 2) for _, row in df.iterrows()]
+            "Дата": [format_date_for_human(row[date_col_name]) if date_col is not None and pd.notna(row[date_col_name]) else f"Запись {idx}" for idx, row in df.iterrows()],
+            "Значение": [round(float(row[col]), 2) if pd.notna(row[col]) else 0.0 for _, row in df.iterrows()]
         })
 
-        # Логируем первые несколько строк данных для отладки
+        # Математический расчёт минимума и максимума
+        min_value = temp_df["Значение"].min()
+        max_value = temp_df["Значение"].max()
+        min_date = temp_df.loc[temp_df["Значение"].idxmin(), "Дата"]
+        max_date = temp_df.loc[temp_df["Значение"].idxmax(), "Дата"]
+        min_max_hint = f"Минимальное значение: {min_value} {min_date}, Максимальное значение: {max_value} {max_date}"
+
+        # Логируем данные для отладки
         logger.info(f"Первые 5 строк данных для LLM:\n{temp_df.head().to_string()}")
 
         # Создаем временный CSV-файл
@@ -100,38 +163,69 @@ class TimeSeriesAnalyzer:
 
         try:
             # Кодируем CSV-файл в base64
-            with open(temp_file_path, "rb") as file:
-                encoded_csv = base64.b64encode(file.read()).decode("utf-8")
+            encoded_csv = self.encode_data(temp_df)
             logger.info(f"CSV-файл закодирован в base64: {temp_file_path}")
 
-            # Формируем промпт для LLM
-            prompt = f"""Ты успешный аналитик временных рядов.
-Проанализируй временной ряд, представленный в CSV-файле (формат: Дата,Значение), закодированном в base64:
-```
-{encoded_csv}
-```
-Извлеки следующие характеристики и верни их в формате JSON:
-- trend: тренд временного ряда (восходящий, нисходящий, стабильный)
-- seasonality: наличие сезонности (присутствует, отсутствует)
-- anomalies_description: текстовое описание аномалий, включая их даты, значения и предполагаемые причины (например, "Аномалия 5000 на 2023-06-15, возможно, из-за рыночного сбоя")
-- min_value: минимальное значение и предполагаемая дата (например, "<число> на ГГГГ-ММ-ДД")
-- max_value: максимальное значение и предполагаемая дата (например, "<число> на ГГГГ-ММ-ДД")
-Если аномалии отсутствуют, укажи в anomalies_description: "Аномалии не обнаружены".
-Если какие-то данные не удается определить, укажи "неизвестно".
-Верни результат в формате JSON, заключенном в ```json ```.
-Инструкция: Декодируй base64 в CSV, проанализируй данные, определи аномалии и предположи возможные причины, основываясь на контексте данных. Используй только значения из CSV.
-"""
+            # Кодируем изображение, если оно есть
+            base64_image = self.encode_image(image_path) if image_path else ""
 
-            logger.info(f"Промпт для LLM:\n{prompt[:500]}...")  # Логируем начало промпта для отладки
+            # Формируем промпт по частям
+            prompt_parts = [
+                f"Дашборд в области {domain} показывает метрику {main_metric}.",
+                "Ты успешный аналитик временных рядов. Проанализируй временной ряд, представленный в CSV-файле (формат: Дата,Значение), закодированном в base64:",
+                f"```\n{encoded_csv}\n```",
+                f"Изображение дашборда в base64: {'присутствует' if base64_image else 'отсутствует'}",
+                f"Подсказка по данным: {min_max_hint}",
+                "Извлеки следующие характеристики и верни их в формате JSON:",
+                "- metric: метрика временного ряда (используй переданную метрику)",
+                "- domain: область дашборда (используй переданную область)",
+                "- trend: подробное описание трендов временного ряда (например, 'С начала периода до 1990 года наблюдается восходящий тренд, затем с 1990 по 2000 год тренд стабилизируется', если применимо; если один тренд, опиши его детально)",
+                "- seasonality: подробное описание наличия и характера сезонности (например, 'Сезонность присутствует с годовым циклом, с пиками в летние месяцы', если применимо; если отсутствует, укажи это с объяснением)",
+                "- min_value: минимальное значение и дата (проверь и скорректируй на основе данных и изображения, например, '500 на 1 мая 1999 года')",
+                "- max_value: максимальное значение и дата (проверь и скорректируй на основе данных и изображения, например, '5000 на 15 декабря 2000 года')",
+                "- anomalies: список аномалий с подробным описанием (например, [{'value': 5000, 'date': '1 июня 1999 года', 'description': 'Резкий скачок, возможно, связанный с событием X'}])",
+                "- hypotheses: подробные гипотезы, объясняющие характеристики временного ряда (например, 'Восходящий тренд с 1980 по 1990 год может быть связан с экономическим ростом, а скачок в 1995 году — с технологическим прорывом'), с объяснением каждого наблюдаемого тренда, пика или скачка",
+                "Если аномалии отсутствуют, верни пустой список в anomalies.",
+                "Если какие-то данные не удается определить, укажи 'неизвестно'.",
+                "Верни результат в формате JSON, заключенном в ```json ```.",
+                "Инструкция: Декодируй base64 в CSV, проанализируй данные и изображение, учти метрику, область и подсказку. Скорректируй даты для min_value и max_value в человеко-читаемом формате (например, 'в 1999 году' для года или 'на 1 мая 1999 года' для полной даты). Опиши тренды, сезонность и аномалии максимально детально, включая несколько этапов или пиков, если они есть. Сформируй гипотезы для каждого наблюдаемого явления."
+            ]
+            prompt = "\n".join(prompt_parts)
+            logger.info(f"Полный промпт для LLM (первые 500 символов):\n{prompt[:500]}...")
+
+            # Проверяем длину промпта
+            if len(prompt) > 100000:
+                logger.error(f"Промпт слишком длинный ({len(prompt)} символов), возвращается ошибка")
+                return {
+                    "metric": main_metric,
+                    "domain": domain,
+                    "trend": "неизвестно",
+                    "seasonality": "неизвестно",
+                    "min_value": f"{min_value} {min_date}",
+                    "max_value": f"{max_value} {max_date}",
+                    "anomalies": [],
+                    "hypotheses": "Промпт слишком длинный"
+                }
 
             try:
                 # Отправляем запрос к LLM
                 response = client.chat.completions.create(
                     model="openai.gpt-4o-mini",
                     messages=[
-                        {"role": "user", "content": prompt}
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/jpeg;base64,{base64_image}"
+                                    }
+                                } if base64_image else {"type": "text", "text": "Изображение отсутствует"}
+                            ]
+                        }
                     ],
-                    max_tokens=300,
+                    max_tokens=1000,  # Увеличиваем для более подробного ответа
                     temperature=0.5,
                     stream=False
                 )
@@ -145,17 +239,51 @@ class TimeSeriesAnalyzer:
                     json_content = match.group(1).strip()
                     try:
                         result = json.loads(json_content)
-                        logger.info(f"Характеристики временного ряда (LLM): {result}")
+                        result["metric"] = main_metric  # Гарантируем, что метрика совпадает
+                        result["domain"] = domain  # Гарантируем, что домен совпадает
+                        # Проверяем и корректируем min_value и max_value, если они отличаются
+                        if "min_value" in result and result["min_value"] != f"{min_value} {min_date}":
+                            logger.warning(f"LLM изменил min_value: {result['min_value']} vs {min_value} {min_date}")
+                        if "max_value" in result and result["max_value"] != f"{max_value} {max_date}":
+                            logger.warning(f"LLM изменил max_value: {result['max_value']} vs {max_value} {max_date}")
+                        logger.info(f"Характеристики временного ряда: {result}")
                         return result
                     except json.JSONDecodeError:
                         logger.error(f"Некорректный JSON от LLM: {json_content}")
-                        return {"error": f"Некорректные данные от LLM: {json_content}"}
+                        return {
+                            "metric": main_metric,
+                            "domain": domain,
+                            "trend": "неизвестно",
+                            "seasonality": "неизвестно",
+                            "min_value": f"{min_value} {min_date}",
+                            "max_value": f"{max_value} {max_date}",
+                            "anomalies": [],
+                            "hypotheses": "Некорректные данные от LLM"
+                        }
                 else:
                     logger.error(f"JSON не найден в ответе LLM: {content}")
-                    return {"error": f"JSON не найден в ответе LLM: {content}"}
+                    return {
+                        "metric": main_metric,
+                        "domain": domain,
+                        "trend": "неизвестно",
+                        "seasonality": "неизвестно",
+                        "min_value": f"{min_value} {min_date}",
+                        "max_value": f"{max_value} {max_date}",
+                        "anomalies": [],
+                        "hypotheses": "JSON не найден в ответе LLM"
+                    }
             except Exception as e:
-                logger.error(f"Ошибка анализа временного ряда через LLM: {str(e)}")
-                return {"error": f"Ошибка анализа: {str(e)}"}
+                logger.error(f"Ошибка анализа временного ряда: {str(e)}")
+                return {
+                    "metric": main_metric,
+                    "domain": domain,
+                    "trend": "неизвестно",
+                    "seasonality": "неизвестно",
+                    "min_value": f"{min_value} {min_date}",
+                    "max_value": f"{max_value} {max_date}",
+                    "anomalies": [],
+                    "hypotheses": f"Ошибка анализа: {str(e)}"
+                }
         finally:
             # Удаляем временный файл
             try:
@@ -163,12 +291,3 @@ class TimeSeriesAnalyzer:
                 logger.info(f"Временный файл удален: {temp_file_path}")
             except Exception as e:
                 logger.error(f"Ошибка при удалении временного файла {temp_file_path}: {str(e)}")
-
-    def analyze_time_series(self, df: pd.DataFrame) -> Dict:
-        """Анализирует временной ряд, возвращая результаты обоих методов."""
-        mathematical_features = self.analyze_time_series_mathematical(df)
-        llm_features = self.analyze_time_series_llm(df)
-        return {
-            "mathematical": mathematical_features,
-            "llm": llm_features
-        }

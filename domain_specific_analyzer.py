@@ -10,7 +10,7 @@ class DomainSpecificAnalyzer:
     def __init__(self, default_domain: str = "finance"):
         self.default_domain = default_domain
         self.max_rows = 100  # Ограничение на количество строк для CSV
-        self.max_base64_length = 50000  # Максимальная длина base64-строки (примерно)
+        self.max_base64_length = 50000  # Максимальная длина base64-строки
 
     def encode_image(self, image_path: str) -> str:
         """Кодирует изображение в формат base64."""
@@ -66,15 +66,15 @@ class DomainSpecificAnalyzer:
             logger.error(f"JSON не найден в ответе LLM: {content}")
         return self.default_domain
 
-    def suggest_domain(self, image_path: Optional[str], data_path: Optional[str]) -> str:
-        """Определяет область дашборда на основе изображения и данных, возвращая строку."""
+    def suggest_domain(self, image_path: Optional[str], data_path: Optional[str]) -> dict:
+        """Определяет область дашборда на основе изображения и данных, возвращая JSON."""
         # Подготовка данных
         base64_image = self.encode_image(image_path) if image_path else ""
         base64_data = self.encode_data(Path(data_path)) if data_path else ""
         # Проверка, есть ли хотя бы один источник данных
         if not base64_image and not base64_data:
             logger.warning("Отсутствуют данные и изображение, возвращается default_domain")
-            return self.default_domain
+            return {"domain": self.default_domain}
         # Формируем промпт
         prompt = f"""Ты аналитик данных. На основе изображения дашборда и данных временного ряда определи область применения дашборда.
 Извлеки контекст из полученных данных, а именно область применения дашборда (например, финансы, экономика, криптовалюта, медицина, политика, компьютерные вычисления и прочее, что можешь распознать).
@@ -87,9 +87,9 @@ class DomainSpecificAnalyzer:
         # Проверка длины промпта
         prompt_length = len(prompt)
         logger.info(f"Длина промпта: {prompt_length} символов")
-        if prompt_length > 100000:  # Примерный лимит для предотвращения превышения токенов
+        if prompt_length > 100000:
             logger.error(f"Промпт слишком длинный ({prompt_length} символов), возвращается default_domain")
-            return self.default_domain
+            return {"domain": self.default_domain}
         try:
             # Отправляем запрос к LLM
             response = client.chat.completions.create(
@@ -112,26 +112,25 @@ class DomainSpecificAnalyzer:
                 temperature=0.5,
                 stream=False
             )
-            # Проверяем, что ответ существует и содержит choices
             if not response or not hasattr(response, 'choices') or not response.choices:
                 logger.error("Ответ от LLM пустой или не содержит choices")
-                return self.default_domain
+                return {"domain": self.default_domain}
             content = response.choices[0].message.content
             if not content:
                 logger.error("Пустое содержимое ответа от LLM")
-                return self.default_domain
+                return {"domain": self.default_domain}
             logger.info(f"Ответ LLM для определения области: {content}")
             # Извлекаем домен из ответа
-            domain = self.extract_text_from_response(content)
-            logger.info(f"Предполагаемая область дашборда: {domain}")
-            return domain
+            json_content = self.extract_text_from_response(content)
+            return {"domain": json_content}
         except Exception as e:
             logger.error(f"Ошибка при обращении к LLM: {str(e)}")
-            return self.default_domain
+            return {"domain": self.default_domain}
 
     def adapt_to_domain(self, annotation: str, image_path: Optional[str] = None, data_path: Optional[str] = None) -> str:
         """Адаптирует аннотацию, добавляя название домена."""
-        domain = self.suggest_domain(image_path, data_path)
+        domain_result = self.suggest_domain(image_path, data_path)
+        domain = domain_result.get("domain", self.default_domain)
         # Формируем итоговую аннотацию с указанием домена
         result = f"Область дашборда: {domain}. {annotation}"
         logger.info(f"Адаптированная аннотация: {result}")

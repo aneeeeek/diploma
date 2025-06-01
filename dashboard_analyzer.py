@@ -29,15 +29,16 @@ class DashboardAnalyzer:
         try:
             base64_image = self.encode_image(image_path)
         except Exception as e:
-            return {"error": f"Не удалось закодировать изображение: {str(e)}"}
+            logger.error(f"Не удалось закодировать изображение: {str(e)}")
+            return {"main_metric": "неизвестно"}
 
         # Формируем промпт для извлечения только метрики
         prompt = """Ты успешный аналитик данных. Проанализируй изображение дашборда, содержащее временной ряд. 
         Извлеки из графика основную метрику/показатель у временного ряда (например, "Продажи золота", "Выручка", "Объем производства"). 
         Сформулируй понятно для человека, на русском языке. Будь внимателен, может быть такое, что метрика указана в названии графика или в легенде.
-        Можешь указать дополнительную информацию, если видишь: страну, крайние даты на оси Х, важные подписи на графике. 
         Верни результат в формате JSON с полем "main_metric". Если метрику определить невозможно, укажи "неизвестно".
         Пример: {"main_metric": "Детская смертность в Бразилии с 1934 по 2023 год"}
+        Ответ должен быть заключен в ```json ```.
         """
 
         try:
@@ -58,12 +59,12 @@ class DashboardAnalyzer:
                         ]
                     }
                 ],
-                max_tokens=100,  # Уменьшаем, так как задача проще
+                max_tokens=100,
                 temperature=0.5,
                 stream=False
             )
             content = response.choices[0].message.content
-            # Извлекаем JSON из markdown, если он есть
+            # Извлекаем JSON из markdown
             json_content = self.extract_json_from_markdown(content)
 
             try:
@@ -72,7 +73,7 @@ class DashboardAnalyzer:
                 if "main_metric" not in result:
                     logger.error(f"Поле main_metric отсутствует в ответе: {json_content}")
                     return {"main_metric": "неизвестно"}
-                logger.info(f"Основная метрика дашборда: {result}")
+                logger.info(f"Основная метрика дашборда: {result['main_metric']}")
                 return result
             except json.JSONDecodeError:
                 logger.error(f"Некорректный JSON от LLM: {json_content}")

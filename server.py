@@ -114,9 +114,8 @@ def chat_callback(chat_container):
                 data_path=data_path,
                 chat_history=st.session_state.chat_history,
                 dash_features=None,
+                domain_features=None,
                 ts_features=None,
-                general_annotation=None,
-                domain_annotation=None,
                 final_annotation=None,
                 user_query=None,
                 response=None
@@ -146,9 +145,8 @@ def chat_callback(chat_container):
             chat_history=st.session_state.chat_history,
             user_query=user_input,
             dash_features=None,
+            domain_features=None,
             ts_features=None,
-            general_annotation=None,
-            domain_annotation=None,
             final_annotation=None,
             response=None
         )
