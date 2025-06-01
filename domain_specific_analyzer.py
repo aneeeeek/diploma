@@ -7,7 +7,7 @@ from config import client, logger
 from typing import Optional
 
 class DomainSpecificAnalyzer:
-    def __init__(self, default_domain: str = "finance"):
+    def __init__(self, default_domain: str = ""):
         self.default_domain = default_domain
         self.max_rows = 100  # Ограничение на количество строк для CSV
         self.max_base64_length = 50000  # Максимальная длина base64-строки
@@ -93,7 +93,7 @@ class DomainSpecificAnalyzer:
         try:
             # Отправляем запрос к LLM
             response = client.chat.completions.create(
-                model="openai.gpt-4o-mini",
+                model="aimediator.gpt-4.1-mini",
                 messages=[
                     {
                         "role": "user",

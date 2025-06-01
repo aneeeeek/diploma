@@ -210,7 +210,7 @@ class TimeSeriesAnalyzer:
             try:
                 # Отправляем запрос к LLM
                 response = client.chat.completions.create(
-                    model="openai.gpt-4o-mini",
+                    model="aimediator.gpt-4.1-mini",
                     messages=[
                         {
                             "role": "user",

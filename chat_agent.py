@@ -1,68 +1,56 @@
 import json
-from typing import List, Dict, Optional
+from typing import Dict, Optional, List
 from config import llm, logger
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
+
 class ChatAgent:
     def generate_general_annotation(self, ts_features: Dict) -> str:
-        """Создает краткую аннотацию на естественном языке из JSON временного ряда."""
-        if "error" in ts_features or not all(key in ts_features for key in ["metric", "domain", "trend", "seasonality"]):
+        """Создает аннотацию на основе характеристик временного ряда через LLM."""
+        # Проверяем наличие обязательных ключей
+        if "error" in ts_features or not all(
+                key in ts_features for key in ["metric", "domain", "trend", "seasonality"]):
             error_msg = f"Ошибка: Некорректные данные временного ряда: {ts_features.get('error', 'Недостаточно данных')}"
             logger.error(error_msg)
             return error_msg
 
-        # Извлекаем данные
-        metric = ts_features.get("metric", "неизвестно")
-        domain = ts_features.get("domain", "неизвестно")
-        trend = ts_features.get("trend", "неизвестно")
-        seasonality = ts_features.get("seasonality", "неизвестно")
-        min_value = ts_features.get("min_value", "неизвестно")
-        max_value = ts_features.get("max_value", "неизвестно")
-        anomalies = ts_features.get("anomalies", [])
-        hypotheses = ts_features.get("hypotheses", "Гипотезы отсутствуют")
-
-        # Формируем базовую аннотацию
-        annotation = f"Дашборд отображает {metric} в области {domain}. {trend}. {seasonality}. "
-        if max_value != "неизвестно" or min_value != "неизвестно":
-            annotation += f"Максимум: {max_value}, минимум: {min_value}. "
-        if anomalies:
-            anomalies_text = ", ".join([f"{a['value']} на {a['date']}" for a in anomalies])
-            annotation += f"Обнаружены аномалии: {anomalies_text}. "
-        annotation += f"{hypotheses}"
-
-        # Удаляем лишние пробелы
-        annotation = " ".join(annotation.split())
-        logger.info(f"Сгенерирована аннотация: {annotation}")
-
-        # Проверяем и улучшаем аннотацию
-        return self.review_annotation(annotation, ts_features)
-
-    def review_annotation(self, annotation: str, ts_features: Dict) -> str:
-        """Проверяет и улучшает аннотацию на естественность и согласованность."""
+        # Формируем промпт для LLM
         prompt = ChatPromptTemplate.from_template(
-            """Проверь аннотацию на естественность, краткость и согласованность с данными:
-            Аннотация: {annotation}
+            """Ты аналитик данных. На основе характеристик временного ряда составь аннотацию по следующему плану:
+            1. Опиши область и метрику дашборда одним предложением.
+            2. Опиши тренды и сезонность, указав их характер и особенности.
+            3. Укажи максимальное и минимальное значения с датами.
+            4. Опиши обнаруженные аномалии, если они есть, или укажи их отсутствие.
+            5. Предложи гипотезы, объясняющие тренды, сезонность или аномалии.
+
             Характеристики временного ряда: {ts_features}
-            Убедись, что аннотация звучит естественно, как текст для человека, и не содержит противоречий.
-            Верни улучшенную версию аннотации, сохраняя краткость, БЕЗ ПОДПУНКТОВ одним абзацем!"""
+
+            Верни аннотацию одним абзацем, кратко и естественно, как для человека, используя термины в нужной области.
+            Не используй подзаголовки или списки, только связный текст.
+            Если данные отсутствуют или некорректны, укажи это в аннотации."""
         )
+
+        # Создаем цепочку обработки
         chain = prompt | llm | StrOutputParser()
+
         try:
+            # Отправляем запрос к LLM с JSON-строкой характеристик
             response = chain.invoke({
-                "annotation": annotation,
-                "ts_features": json.dumps(ts_features)
+                "ts_features": json.dumps(ts_features, ensure_ascii=False)
             })
-            logger.info(f"Улучшенная аннотация: {response}")
+            logger.info(f"Сгенерирована аннотация: {response}")
             return response
         except Exception as e:
-            logger.error(f"Ошибка при проверке аннотации: {str(e)}")
-            return annotation
+            logger.error(f"Ошибка при генерации аннотации: {str(e)}")
+            return f"Ошибка генерации аннотации: {str(e)}"
 
-    def process_user_query(self, query: str, image_path: Optional[str], data_path: Optional[str], chat_history: List[Dict]) -> str:
+    def process_user_query(self, query: str, image_path: Optional[str], data_path: Optional[str],
+                           chat_history: List[Dict]) -> str:
         """Обрабатывает запрос пользователя с учетом контекста и финансовых терминов."""
         query_lower = query.lower()
-        if any(keyword in query_lower for keyword in ["тренд", "закономерность", "сезонность", "аномалия", "минимум", "максимум"]):
+        if any(keyword in query_lower for keyword in
+               ["тренд", "закономерность", "сезонность", "аномалия", "минимум", "максимум"]):
             agent = "dashboard"
         elif any(keyword in query_lower for keyword in ["показатель", "kpi"]):
             agent = "dashboard"

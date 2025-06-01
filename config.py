@@ -17,7 +17,7 @@ client = OpenAI(
 llm = ChatOpenAI(
     openai_api_key=os.getenv("API_KEY", "sk-eae1582d53c2402b9d7be1f1a882c79f"),
     openai_api_base="https://llm.glowbyteconsulting.com/api",
-    model_name="openai.gpt-4o-mini",
+    model_name="aimediator.gpt-4.1-mini",
     temperature=0.5,
     max_tokens=500
 )

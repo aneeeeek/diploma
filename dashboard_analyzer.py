@@ -44,7 +44,7 @@ class DashboardAnalyzer:
         try:
             # Отправляем запрос с текстом и изображением
             response = client.chat.completions.create(
-                model="openai.gpt-4o-mini",
+                model="aimediator.gpt-4.1-mini",
                 messages=[
                     {
                         "role": "user",
