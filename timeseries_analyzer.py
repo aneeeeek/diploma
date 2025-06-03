@@ -94,11 +94,12 @@ class TimeSeriesAnalyzer:
 
         try:
             if pd.api.types.is_numeric_dtype(df[date_col_name]):
-                df[date_col_name] = pd.to_datetime(df[date_col_name].astype(int).astype(str) + '-01-01', errors='coerce')
+                df[date_col_name] = pd.to_datetime(df[date_col_name].astype(int).astype(str) + '-01-01',
+                                                   errors='coerce')
                 logger.info(f"Колонка {date_col_name} преобразована в datetime")
             elif df[date_col_name].dtype == 'object':
                 if df[date_col_name].str.match(r'Занлись \d+').any():
-                    df[date_col_name] = df[date_col_name].str.extract(r'Занлись (\d+)').astype(float).astype(int) + 1945
+                    df[date_col_name] = df[date_col_name].str.extract(r'Занлись (\д+)').astype(float).astype(int) + 1945
                     df[date_col_name] = pd.to_datetime(df[date_col_name].astype(str) + '-01-01')
                     logger.info(f"Колонка {date_col_name} преобразована из формата 'Занлись \d+' в datetime")
                 else:
@@ -128,7 +129,8 @@ class TimeSeriesAnalyzer:
 
         context = {}
         temp_df = pd.DataFrame({
-            "Дата": [format_date_for_human(row[date_col_name]) if date_col is not None and pd.notna(row[date_col_name]) else f"Запись {idx}" for idx, row in df.iterrows()],
+            "Дата": [format_date_for_human(row[date_col_name]) if date_col is not None and pd.notna(
+                row[date_col_name]) else f"Запись {idx}" for idx, row in df.iterrows()],
             "Значение": [round(float(row[col]), 2) if pd.notna(row[col]) else 0.0 for _, row in df.iterrows()]
         })
 
@@ -185,7 +187,8 @@ class TimeSeriesAnalyzer:
                                     "image_url": {
                                         "url": f"data:image/jpeg;base64,{base64_image}"
                                     }
-                                } if base64_image and not base64_image.startswith("Ошибка") else {"type": "text", "text": "Изображение отсутствует"}
+                                } if base64_image and not base64_image.startswith("Ошибка") else {"type": "text",
+                                                                                                  "text": "Изображение отсутствует"}
                             ]
                         }
                     ],
@@ -264,16 +267,34 @@ class TimeSeriesAnalyzer:
             except Exception as e:
                 logger.error(f"Ошибка при удалении временного файла {temp_file_path}: {str(e)}")
 
-    def query_timeseries(self, query: str, data_path: Optional[str], context: str) -> str:
+    def query_timeseries(self, query: str, image_path: Optional[str], data_path: Optional[str], context: str,
+                         ts_features: Optional[Dict] = None) -> str:
         """Обрабатывает запрос пользователя, связанный с характеристиками временного ряда."""
-        if not data_path:
+        if not data_path or not ts_features:
+            return "неизвестно"
+
+        try:
+            base64_image = self.encode_image(image_path) if image_path else "отсутствует"
+            df, _ = self.read_data(Path(data_path))
+            if df is None:
+                return "неизвестно"
+            encoded_data = self.encode_data(df)
+            if encoded_data.startswith("Ошибка"):
+                return "неизвестно"
+        except Exception as e:
+            logger.error(f"Ошибка при доступе к данным: {str(e)}")
             return "неизвестно"
 
         prompt = ChatPromptTemplate.from_template(
             """Ты аналитик временных рядов. Твоя роль — анализировать тренды, сезонность, аномалии и другие характеристики временного ряда.
             Запрос пользователя: {query}
             Контекст: {context}
+            Характеристики временного ряда: {ts_features}
+            Изображение дашборда в base64: {base64_image}
+            Данные временного ряда в CSV (base64): {encoded_data}
+
             Ответь на вопрос, если он связан с характеристиками временного ряда (например, тренды, сезонность, аномалии, минимум/максимум).
+            Используй предоставленные характеристики, изображение и данные для ответа.
             Используй термины, специфичные для финансовой области, если применимо.
             Если вопрос не относится к твоей роли, верни "неизвестно".
             Верни ответ кратко, одним-двумя предложениями."""
@@ -282,12 +303,12 @@ class TimeSeriesAnalyzer:
         chain = prompt | llm | StrOutputParser()
 
         try:
-            df, _ = self.read_data(Path(data_path))
-            if df is None:
-                return "неизвестно"
             response = chain.invoke({
                 "query": query,
-                "context": context
+                "context": context,
+                "ts_features": json.dumps(ts_features, ensure_ascii=False),
+                "base64_image": base64_image,
+                "encoded_data": encoded_data
             })
             logger.info(f"Ответ Timeseries Agent: {response}")
             return response

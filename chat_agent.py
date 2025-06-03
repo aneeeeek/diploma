@@ -50,14 +50,16 @@ class ChatAgent:
             return f"Ошибка генерации аннотации: {str(e)}"
 
     def process_user_query(self, query: str, image_path: Optional[str], data_path: Optional[str],
-                           chat_history: List[Dict]) -> str:
+                           chat_history: List[Dict], dash_features: Optional[Dict] = None,
+                           domain_features: Optional[Dict] = None, ts_features: Optional[Dict] = None) -> str:
         """Пересылает запрос пользователя агентам и объединяет их ответы."""
         context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in chat_history[-5:]])
 
         # Пересылаем запрос каждому агенту
-        dashboard_response = self.dashboard_analyzer.query_dashboard(query, image_path, context)
-        domain_response = self.domain_analyzer.query_domain(query, image_path, data_path, context)
-        timeseries_response = self.timeseries_analyzer.query_timeseries(query, data_path, context)
+        dashboard_response = self.dashboard_analyzer.query_dashboard(query, image_path, context, dash_features)
+        domain_response = self.domain_analyzer.query_domain(query, context, domain_features)
+        timeseries_response = self.timeseries_analyzer.query_timeseries(query, image_path, data_path, context,
+                                                                        ts_features)
 
         # Собираем ответы
         responses = {

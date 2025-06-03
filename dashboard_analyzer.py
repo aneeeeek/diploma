@@ -1,11 +1,10 @@
 import json
 import base64
 import re
-from typing import Optional
-
 from config import client, logger, llm
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from typing import Optional, Dict
 
 
 class DashboardAnalyzer:
@@ -82,16 +81,28 @@ class DashboardAnalyzer:
             logger.error(f"Ошибка анализа изображения дашборда: {str(e)}")
             return {"main_metric": "неизвестно"}
 
-    def query_dashboard(self, query: str, image_path: Optional[str], context: str) -> str:
+    def query_dashboard(self, query: str, image_path: Optional[str], context: str,
+                        dash_features: Optional[Dict] = None) -> str:
         """Обрабатывает запрос пользователя, связанный с визуальными элементами дашборда."""
         if not image_path:
             return "неизвестно"
 
+        try:
+            base64_image = self.encode_image(image_path)
+        except Exception as e:
+            logger.error(f"Ошибка при кодировании изображения: {str(e)}")
+            return "неизвестно"
+
+        main_metric = dash_features.get("main_metric", "неизвестно") if dash_features else "неизвестно"
         prompt = ChatPromptTemplate.from_template(
             """Ты аналитик дашбордов. Твоя роль — анализировать визуальные элементы дашборда (графики, метрики, подписи).
             Запрос пользователя: {query}
             Контекст: {context}
+            Основная метрика дашборда: {main_metric}
+            Изображение дашборда в base64: {base64_image}
+
             Ответь на вопрос, если он связан с визуальными элементами дашборда (например, метрика, название графика, легенда).
+            Используй переданную метрику и изображение для ответа.
             Используй термины, специфичные для финансовой области, если применимо.
             Если вопрос не относится к твоей роли, верни "неизвестно".
             Верни ответ кратко, одним-двумя предложениями."""
@@ -100,10 +111,11 @@ class DashboardAnalyzer:
         chain = prompt | llm | StrOutputParser()
 
         try:
-            base64_image = self.encode_image(image_path)
             response = chain.invoke({
                 "query": query,
-                "context": context
+                "context": context,
+                "main_metric": main_metric,
+                "base64_image": base64_image
             })
             logger.info(f"Ответ Dashboard Agent: {response}")
             return response

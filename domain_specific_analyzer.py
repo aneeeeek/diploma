@@ -4,7 +4,7 @@ import re
 import pandas as pd
 from pathlib import Path
 from config import client, logger, llm
-from typing import Optional
+from typing import Optional, Dict
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
@@ -60,7 +60,7 @@ class DomainSpecificAnalyzer:
             logger.error(f"JSON не найден в ответе LLM: {content}")
         return self.default_domain
 
-    def suggest_domain(self, image_path: Optional[str], data_path: Optional[str]) -> dict:
+    def suggest_domain(self, image_path: Optional[str], data_path: Optional[str]) -> Dict:
         """Определяет область дашборда на основе изображения и данных, возвращая JSON."""
         base64_image = self.encode_image(image_path) if image_path else ""
         base64_data = self.encode_data(Path(data_path)) if data_path else ""
@@ -89,7 +89,8 @@ class DomainSpecificAnalyzer:
                                 "image_url": {
                                     "url": f"data:image/jpeg;base64,{base64_image}"
                                 }
-                            } if base64_image and not base64_image.startswith("Ошибка") else {"type": "text", "text": "Изображение отсутствует"}
+                            } if base64_image and not base64_image.startswith("Ошибка") else {"type": "text",
+                                                                                              "text": "Изображение отсутствует"}
                         ]
                     }
                 ],
@@ -110,16 +111,21 @@ class DomainSpecificAnalyzer:
         except Exception as e:
             logger.error(f"Ошибка при обращении к LLM: {str(e)}")
             if "413" in str(e) or "request too large" in str(e).lower():
-                return {"domain": self.default_domain, "error": "Слишком большой объем данных или изображения. Пожалуйста, уменьшите размер файла."}
+                return {"domain": self.default_domain,
+                        "error": "Слишком большой объем данных или изображения. Пожалуйста, уменьшите размер файла."}
             return {"domain": self.default_domain, "error": f"Ошибка анализа: {str(e)}"}
 
-    def query_domain(self, query: str, image_path: Optional[str], data_path: Optional[str], context: str) -> str:
+    def query_domain(self, query: str, context: str, domain_features: Optional[Dict] = None) -> str:
         """Обрабатывает запрос пользователя, связанный с областью применения дашборда."""
+        domain = domain_features.get("domain", self.default_domain) if domain_features else self.default_domain
         prompt = ChatPromptTemplate.from_template(
             """Ты аналитик данных, специализирующийся на определении области применения дашборда.
             Запрос пользователя: {query}
             Контекст: {context}
+            Область дашборда: {domain}
+
             Ответь на вопрос, если он связан с областью применения дашборда (например, финансы, медицина, экономика).
+            Используй указанную область для ответа.
             Используй термины, специфичные для финансовой области, если применимо.
             Если вопрос не относится к твоей роли, верни "неизвестно".
             Верни ответ кратко, одним-двумя предложениями."""
@@ -130,7 +136,8 @@ class DomainSpecificAnalyzer:
         try:
             response = chain.invoke({
                 "query": query,
-                "context": context
+                "context": context,
+                "domain": domain
             })
             logger.info(f"Ответ Domain Agent: {response}")
             return response
