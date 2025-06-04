@@ -1,7 +1,9 @@
 import json
 import base64
 import re
-from config import client, logger, llm
+from pathlib import Path
+
+from config import client, logger, llm, ALLOWED_IMAGE_EXTENSIONS
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from typing import Optional, Dict
@@ -9,7 +11,9 @@ from typing import Optional, Dict
 
 class DashboardAnalyzer:
     def encode_image(self, image_path: str) -> str:
-        """Кодирует изображение в формат base64."""
+        if not Path(image_path).suffix[1:].lower() in ALLOWED_IMAGE_EXTENSIONS:
+            logger.error(f"Неподдерживаемый формат файла: {image_path}")
+            raise ValueError(f"Неподдерживаемый формат файла: {Path(image_path).suffix}")
         try:
             with open(image_path, "rb") as image_file:
                 encoded_string = base64.b64encode(image_file.read()).decode("utf-8")

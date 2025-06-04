@@ -25,5 +25,5 @@ llm = ChatOpenAI(
 # Конфигурация директорий
 UPLOAD_DIR = "uploads"
 DATA_DIR = "data"
-ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
-ALLOWED_DATA_EXTENSIONS = {'csv', 'txt', 'xlsx'}
+ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg'}
+ALLOWED_DATA_EXTENSIONS = {'csv', 'xlsx'}

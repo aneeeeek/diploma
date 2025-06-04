@@ -1,4 +1,5 @@
 import streamlit as st
+from config import logger
 
 def setup_interface(
     upload_image_callback,
@@ -11,6 +12,7 @@ def setup_interface(
     clear_directory_callback
 ):
     """Настраивает интерфейс с двумя колонками: дашборд и данные в одной, чат в другой."""
+    logger.info("Начало настройки интерфейса")
     # Создаем две колонки
     col1, col2 = st.columns([3, 3])
 
@@ -18,19 +20,26 @@ def setup_interface(
     with col1:
         # Панель для изображения
         st.header("Изображение дашборда")
-        display_image_callback(get_current_image())
         uploaded_image = st.file_uploader(
             "Загрузите изображение дашборда",
-            type=["png", "jpg", "jpeg", "gif"],
+            type=["png", "jpg", "jpeg"],
             key="image_uploader",
             accept_multiple_files=False
         )
         if uploaded_image is not None:
-            upload_image_callback(uploaded_image)
+            try:
+                upload_image_callback(uploaded_image)
+                st.session_state["image_uploaded"] = True
+                st.success("Изображение успешно загружено!")
+                logger.info("Обработана загрузка изображения")
+            except Exception as e:
+                st.error(f"Ошибка при загрузке изображения: {str(e)}")
+                logger.error(f"Ошибка при загрузке изображения: {str(e)}")
+        display_image_callback(get_current_image())
+        logger.info("Вызван display_image_callback")
 
         # Панель для данных
         st.header("Данные временного ряда")
-        display_data_callback(get_current_data())
         uploaded_data = st.file_uploader(
             "Загрузить файл данных",
             type=["csv", "txt", "xlsx"],
@@ -38,12 +47,23 @@ def setup_interface(
             accept_multiple_files=False
         )
         if uploaded_data is not None:
-            upload_data_callback(uploaded_data)
+            try:
+                upload_data_callback(uploaded_data)
+                st.session_state["data_uploaded"] = True
+                st.success("Данные успешно загружены!")
+                logger.info("Обработана загрузка данных")
+            except Exception as e:
+                st.error(f"Ошибка при загрузке данных: {str(e)}")
+                logger.error(f"Ошибка при загрузке данных: {str(e)}")
+        display_data_callback(get_current_data())
+        logger.info("Вызван display_data_callback")
 
     # Вторая колонка: чат
     with col2:
         st.header("Аннотация к временному ряду и чат")
         chat_container = st.container()
         chat_callback(chat_container)
+        logger.info("Вызван chat_callback")
 
+    logger.info("Интерфейс настроен")
     return col1, col2
