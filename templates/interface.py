@@ -1,15 +1,16 @@
 import streamlit as st
 from config import logger
 
+
 def setup_interface(
-    upload_image_callback,
-    upload_data_callback,
-    display_image_callback,
-    display_data_callback,
-    chat_callback,
-    get_current_image,
-    get_current_data,
-    clear_directory_callback
+        upload_image_callback,
+        upload_data_callback,
+        display_image_callback,
+        display_data_callback,
+        chat_callback,
+        get_current_image,
+        get_current_data,
+        clear_directory_callback
 ):
     """Настраивает интерфейс с двумя колонками: дашборд и данные в одной, чат и кнопка запуска в другой."""
     logger.info("Начало настройки интерфейса")
@@ -30,8 +31,12 @@ def setup_interface(
             try:
                 upload_image_callback(uploaded_image)
                 st.session_state["image_uploaded"] = True
+                st.session_state["error_message"] = None  # Clear error message on successful upload
                 st.success("Изображение успешно загружено!")
                 logger.info("Обработана загрузка изображения")
+                # Сбрасываем file_uploader, чтобы избежать повторной загрузки
+                if "image_uploader" in st.session_state:
+                    del st.session_state["image_uploader"]
             except Exception as e:
                 st.error(f"Ошибка при загрузке изображения: {str(e)}")
                 logger.error(f"Ошибка при загрузке изображения: {str(e)}")
@@ -50,8 +55,12 @@ def setup_interface(
             try:
                 upload_data_callback(uploaded_data)
                 st.session_state["data_uploaded"] = True
+                st.session_state["error_message"] = None  # Clear error message on successful upload
                 st.success("Данные успешно загружены!")
                 logger.info("Обработана загрузка данных")
+                # Сбрасываем file_uploader, чтобы избежать повторной загрузки
+                if "data_uploader" in st.session_state:
+                    del st.session_state["data_uploader"]
             except Exception as e:
                 st.error(f"Ошибка при загрузке данных: {str(e)}")
                 logger.error(f"Ошибка при загрузке данных: {str(e)}")
@@ -64,7 +73,13 @@ def setup_interface(
         if st.button("Запустить", key="run_button"):
             st.session_state["run_triggered"] = True
             st.session_state.chat_history = []  # Clear chat history on Run button click
+            st.session_state["error_message"] = None  # Clear error message on Run button click
             logger.info("Кнопка 'Запустить' нажата, история чата очищена")
+
+        # Display error message if present, before chat_callback
+        if "error_message" in st.session_state and st.session_state["error_message"]:
+            st.error(st.session_state["error_message"])
+
         chat_container = st.container()
         chat_callback(chat_container)
         logger.info("Вызван chat_callback")
