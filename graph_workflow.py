@@ -6,7 +6,7 @@ from domain_specific_analyzer import DomainSpecificAnalyzer
 from chat_agent import ChatAgent
 from pathlib import Path
 
-
+# определение структуры состояния агента
 class AgentState(TypedDict):
     image_path: Optional[str]
     data_path: Optional[str]
@@ -26,6 +26,7 @@ def create_graph():
     domain_specific_analyzer = DomainSpecificAnalyzer()
     chat_agent = ChatAgent()
 
+    # создание графа состояний
     graph = StateGraph(AgentState)
 
     def analyze_dashboard(state: AgentState) -> AgentState:

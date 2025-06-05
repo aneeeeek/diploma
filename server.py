@@ -17,24 +17,25 @@ from timeseries_analyzer import TimeSeriesAnalyzer
 
 logger.info("Начало инициализации приложения")
 
+# установка параметров страницы интерфейса
 try:
     set_page_config()
-    logger.info("set_page_config выполнен")
 except Exception as e:
     logger.error(f"Ошибка в set_page_config: {str(e)}")
     raise
 
+# Инициализация директорий проекта
 def initialize_directories():
     try:
         Path(UPLOAD_DIR).mkdir(exist_ok=True)
         Path(DATA_DIR).mkdir(exist_ok=True)
-        logger.info("Директории инициализированы")
     except Exception as e:
         logger.error(f"Ошибка при инициализации директорий: {str(e)}")
         raise
 
 initialize_directories()
 
+# создание и компиляция графа
 try:
     graph = create_graph()
     logger.info("Граф создан")
@@ -59,10 +60,6 @@ def read_data_preview(file_path):
         elif file_path.endswith('.xlsx'):
             df = pd.read_excel(file_path, nrows=5)
             return df
-        elif file_path.endswith('.txt'):
-            with open(file_path, 'r') as f:
-                lines = [next(f) for _ in range(5)]
-            return "\n".join(lines)
         return ""
     except Exception as e:
         logger.error(f"Ошибка в read_data_preview для {file_path}: {str(e)}")
@@ -199,7 +196,7 @@ def display_data_callback(current_data):
                 logger.info("Данные удалены пользователем, история чата очищена")
                 st.rerun()
         else:
-            st.info("Данные не загружено")
+            st.info("Данные не загружены")
     except Exception as e:
         logger.error(f"Ошибка в display_data_callback: {str(e)}")
 
@@ -214,7 +211,6 @@ async def run_graph(state):
 
 def chat_callback(chat_container):
     try:
-        logger.info("Начало chat_callback")
         if 'chat_history' not in st.session_state:
             st.session_state.chat_history = []
         if 'last_image' not in st.session_state:
