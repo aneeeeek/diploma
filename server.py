@@ -105,7 +105,6 @@ def upload_image_callback(uploaded_image):
         st.session_state.run_triggered = False
         st.session_state.rerun_count = 0
         st.session_state.image_uploaded = True
-        st.session_state.has_initial_annotation = False
         st.session_state.processing = False
         logger.info(f"Изображение загружено: {uploaded_image.name}")
     except Exception as e:
@@ -121,7 +120,6 @@ def upload_data_callback(uploaded_data):
         st.session_state.run_triggered = False
         st.session_state.rerun_count = 0
         st.session_state.data_uploaded = True
-        st.session_state.has_initial_annotation = False
         st.session_state.processing = False
         logger.info(f"Данные загружены: {uploaded_data.name}")
     except Exception as e:
@@ -140,15 +138,14 @@ def display_image_callback(current_image):
                 logger.error(f"Файл не найден: {file_path}")
             if st.button("Удалить изображение", key="remove_image"):
                 clear_directory(UPLOAD_DIR)
-                st.session_state.chat_history = []
+                st.session_state.chat_history = []  # Очищаем историю чата
+                st.session_state.has_initial_annotation = False  # Сбрасываем состояние аннотации
                 st.session_state.last_image = None
                 st.session_state.run_triggered = False
                 st.session_state.rerun_count = 0
                 st.session_state.image_uploaded = False
-                st.session_state.has_initial_annotation = False
-                st.session_state.error_message = None
                 st.session_state.processing = False
-                logger.info("Изображение удалено пользователем")
+                logger.info("Изображение удалено пользователем, история чата очищена")
                 st.rerun()
         else:
             st.info("Изображение не загружено")
@@ -166,15 +163,14 @@ def display_data_callback(current_data):
                 st.text(preview)
             if st.button("Удалить данные", key="remove_data"):
                 clear_directory(DATA_DIR)
-                st.session_state.chat_history = []
+                st.session_state.chat_history = []  # Очищаем историю чата
+                st.session_state.has_initial_annotation = False  # Сбрасываем состояние аннотации
                 st.session_state.last_data = None
                 st.session_state.run_triggered = False
                 st.session_state.rerun_count = 0
                 st.session_state.data_uploaded = False
-                st.session_state.has_initial_annotation = False
-                st.session_state.error_message = None
                 st.session_state.processing = False
-                logger.info("Данные удалены пользователем")
+                logger.info("Данные удалены пользователем, история чата очищена")
                 st.rerun()
         else:
             st.info("Данные не загружено")
@@ -224,12 +220,60 @@ def chat_callback(chat_container):
         current_data = get_current_file(DATA_DIR)
         logger.info(f"chat_callback: current_image={current_image}, current_data={current_data}, run_triggered={st.session_state.run_triggered}, rerun_count={st.session_state.rerun_count}, image_uploaded={st.session_state.image_uploaded}, data_uploaded={st.session_state.data_uploaded}, processing={st.session_state.processing}, pending_processing={st.session_state.pending_processing}")
 
-        # Проверяем, есть ли отложенная обработка запроса
-        if st.session_state.pending_processing and st.session_state.pending_user_input:
+        # Определяем, нужно ли скрывать элементы
+        chat_empty = len(st.session_state.chat_history) == 0
+        should_hide = st.session_state.processing or st.session_state.pending_processing
+        logger.info(f"Состояние скрытия: should_hide={should_hide}, processing={st.session_state.processing}, pending_processing={st.session_state.pending_processing}, chat_empty={chat_empty}")
+
+        # Индикатор загрузки
+        loading_container = st.empty()
+        if should_hide:
+            with loading_container:
+                st.spinner("Обработка...")
+
+        # Контейнер для кнопки "Запустить"
+        run_button_container = st.empty()
+        # Контейнер для поля ввода чата
+        chat_input_container = st.empty()
+
+        # Отображаем кнопку "Запустить", если не нужно скрывать и файлы загружены
+        if not should_hide and current_image and current_data and not st.session_state.run_triggered and chat_empty:
+            if run_button_container.button("Запустить", key="run_button"):
+                st.session_state.run_triggered = True
+                st.session_state.processing = True
+                logger.info("Нажата кнопка 'Запустить'")
+                st.rerun()
+        else:
+            run_button_container.empty()
+
+        # Отображаем поле ввода чата, если не нужно скрывать и есть аннотация или файлы
+        if not should_hide and (len(st.session_state.chat_history) > 0 or (current_image and current_data)):
+            user_input = chat_input_container.chat_input("Задайте вопрос о дашборде...", key="chat_input_main")
+            if user_input and not st.session_state.pending_processing and not st.session_state.processing:
+                logger.info(f"Обработка пользовательского ввода: {user_input}")
+                st.session_state.processing = True
+                st.session_state.pending_processing = True
+                st.session_state.pending_user_input = user_input
+                logger.info(f"Установлено processing=True и pending_processing=True для запроса: {user_input}")
+                st.rerun()
+        else:
+            chat_input_container.empty()
+
+        # Обрабатываем загрузку файлов
+        if st.session_state.image_uploaded or st.session_state.data_uploaded:
+            if st.session_state.pending_user_input:
+                user_input = st.session_state.pending_user_input
+                logger.info(f"Сохранён пользовательский ввод перед перезапуском: {user_input}")
+            st.session_state.image_uploaded = False
+            st.session_state.data_uploaded = False
+            st.session_state.reset_uploaders = True
+            st.rerun()
+
+        # Проверяем и обрабатываем отложенный запрос
+        if st.session_state.pending_processing and st.session_state.pending_user_input and not st.session_state.image_uploaded and not st.session_state.data_uploaded:
             user_input = st.session_state.pending_user_input
             logger.info(f"Обработка отложенного запроса: {user_input}")
-            st.session_state.pending_processing = False
-            if st.session_state.has_initial_annotation or st.session_state.run_triggered:
+            if len(st.session_state.chat_history) > 0 or st.session_state.run_triggered:
                 st.session_state.chat_history.append({"role": "user", "content": user_input})
                 image_path = os.path.join(UPLOAD_DIR, current_image) if current_image else None
                 data_path = os.path.join(DATA_DIR, current_data) if current_data else None
@@ -247,6 +291,7 @@ def chat_callback(chat_container):
                 result = asyncio.run(run_graph(state))
                 st.session_state.processing = False
                 logger.info(f"Сброшено processing=False после обработки запроса: {user_input}")
+                st.session_state.pending_processing = False
                 st.session_state.pending_user_input = None
                 if result["response"]:
                     if "Слишком большой объем" in result["response"]:
@@ -260,29 +305,6 @@ def chat_callback(chat_container):
                 st.session_state.rerun_count = 0
                 st.session_state.reset_uploaders = True
                 st.rerun()
-
-        # Поле ввода чата отключается во время обработки
-        user_input = st.session_state.pending_user_input
-        if not user_input:
-            user_input = st.chat_input("Задайте вопрос о дашборде...", key="chat_input_main", disabled=st.session_state.processing)
-
-        # Обрабатываем загрузку файлов
-        if (st.session_state.image_uploaded or st.session_state.data_uploaded) and user_input:
-            st.session_state.pending_user_input = user_input
-            logger.info(f"Сохранён пользовательский ввод перед перезапуском: {user_input}")
-            st.session_state.image_uploaded = False
-            st.session_state.data_uploaded = False
-            st.session_state.reset_uploaders = True
-            st.rerun()
-
-        # Обрабатываем новый пользовательский ввод
-        if user_input and not (st.session_state.image_uploaded or st.session_state.data_uploaded) and not st.session_state.pending_processing:
-            logger.info(f"Обработка пользовательского ввода: {user_input}")
-            st.session_state.processing = True
-            st.session_state.pending_processing = True
-            st.session_state.pending_user_input = user_input
-            logger.info(f"Установлено processing=True и pending_processing=True для запроса: {user_input}")
-            st.rerun()
 
         # Синхронизируем last_image и last_data
         if current_image and current_image != st.session_state.last_image:
@@ -356,6 +378,10 @@ def chat_callback(chat_container):
                 st.session_state.rerun_count = 0
                 st.session_state.reset_uploaders = True
                 st.rerun()
+
+        # Убираем индикатор загрузки после завершения обработки
+        if not should_hide:
+            loading_container.empty()
 
         # Отображаем чат
         with chat_container:
