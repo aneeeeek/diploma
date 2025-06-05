@@ -1,3 +1,5 @@
+import tempfile
+
 import streamlit as st
 from templates.page_config import set_page_config
 import os
@@ -10,6 +12,8 @@ import asyncio
 from graph_workflow import AgentState, create_graph
 from PIL import Image
 import io
+
+from timeseries_analyzer import TimeSeriesAnalyzer
 
 logger.info("Начало инициализации приложения")
 
@@ -113,6 +117,27 @@ def upload_image_callback(uploaded_image):
 
 def upload_data_callback(uploaded_data):
     try:
+        # Проверяем данные перед сохранением
+        with tempfile.NamedTemporaryFile(delete=False, suffix=uploaded_data.name, mode='wb') as temp_file:
+            temp_file.write(uploaded_data.getbuffer())
+            temp_file_path = temp_file.name
+
+        # Проверяем данные с помощью TimeSeriesAnalyzer
+        timeseries_analyzer = TimeSeriesAnalyzer()
+        df, message = timeseries_analyzer.read_data(Path(temp_file_path))
+
+        # Удаляем временный файл
+        try:
+            os.unlink(temp_file_path)
+            logger.info(f"Временный файл удален: {temp_file_path}")
+        except Exception as e:
+            logger.error(f"Ошибка при удалении временного файла {temp_file_path}: {str(e)}")
+
+        if df is None:
+            st.error(message)  # Отображаем сообщение об ошибке
+            logger.error(f"Ошибка валидации данных {uploaded_data.name}: {message}")
+            return
+
         clear_directory(DATA_DIR)
         with open(os.path.join(DATA_DIR, uploaded_data.name), "wb") as f:
             f.write(uploaded_data.getbuffer())
@@ -121,6 +146,7 @@ def upload_data_callback(uploaded_data):
         st.session_state.rerun_count = 0
         st.session_state.data_uploaded = True
         st.session_state.processing = False
+        st.success("Данные успешно загружены!")
         logger.info(f"Данные загружены: {uploaded_data.name}")
     except Exception as e:
         st.error(f"Ошибка при загрузке данных: {str(e)}")

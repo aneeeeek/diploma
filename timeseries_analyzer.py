@@ -13,26 +13,68 @@ from langchain_core.output_parsers import StrOutputParser
 
 class TimeSeriesAnalyzer:
     def read_data(self, file_path: Path) -> Tuple[Optional[pd.DataFrame], str]:
-        """Читает данные временного ряда с подробной проверкой."""
+        """Читает данные временного ряда с проверкой порядка столбцов (дата/значение или значение/дата)."""
         try:
             if file_path.suffix == '.csv':
                 df = pd.read_csv(file_path)
                 logger.info(f"CSV файл прочитан: {file_path}, размер: {df.shape}, колонки: {df.columns.tolist()}")
                 logger.info(f"Типы данных колонок:\n{df.dtypes}")
             elif file_path.suffix in ['.xlsx', '.xls']:
-                xls = pd.ExcelFile(file_path, engine='openpyxl')
-                for sheet_name in xls.sheet_names:
-                    df = pd.read_excel(xls, sheet_name=sheet_name)
-                    if not df.empty and len(df.columns) >= 2:
-                        if pd.api.types.is_numeric_dtype(df.iloc[:, 1]):
+                with pd.ExcelFile(file_path, engine='openpyxl') as xls:
+                    for sheet_name in xls.sheet_names:
+                        df = pd.read_excel(xls, sheet_name=sheet_name)
+                        if not df.empty and len(df.columns) >= 2:
                             logger.info(f"Данные Excel найдены на листе '{sheet_name}', размер: {df.shape}")
-                            return df, f"Данные найдены на листе '{sheet_name}'"
-                return None, "Подходящие данные в файле Excel не найдены"
+                            # Проверка на количество столбцов
+                            if len(df.columns) > 2:
+                                logger.error(f"Ошибка: Файл {file_path} содержит более двух столбцов ({len(df.columns)})")
+                                return None, "Ошибка: Файл должен содержать только два столбца (дата и значение) для временного ряда."
+                            break
+                    else:
+                        return None, "Подходящие данные в файле Excel не найдены"
             else:
                 return None, f"Неподдерживаемый формат файла: {file_path.suffix}"
+
+            # Проверка на количество столбцов
+            if len(df.columns) != 2:
+                logger.error(f"Ошибка: Файл {file_path} должен содержать ровно два столбца, найдено: {len(df.columns)}")
+                return None, "Ошибка: Файл должен содержать ровно два столбца (дата и значение) для временного ряда."
+
             if df.empty:
                 return None, "Таблица данных пуста"
+
+            # Определяем столбцы с датами и значениями
+            col1, col2 = df.columns[0], df.columns[1]
+            date_col, value_col = None, None
+
+            # Проверяем, является ли первый столбец датой
+            try:
+                pd.to_datetime(df[col1], errors='coerce')
+                if df[col1].notna().sum() > 0 and pd.api.types.is_numeric_dtype(df[col2]):
+                    date_col, value_col = col1, col2
+                    logger.info(f"Первый столбец '{col1}' определен как дата, второй '{col2}' как значение")
+            except Exception:
+                pass
+
+            # Если первый столбец не дата, проверяем второй
+            if date_col is None:
+                try:
+                    pd.to_datetime(df[col2], errors='coerce')
+                    if df[col2].notna().sum() > 0 and pd.api.types.is_numeric_dtype(df[col1]):
+                        date_col, value_col = col2, col1
+                        logger.info(f"Второй столбец '{col2}' определен как дата, первый '{col1}' как значение")
+                        # Перестраиваем DataFrame, чтобы дата была первым столбцом
+                        df = df[[col2, col1]]
+                        df.columns = [col2, col1]  # Сохраняем оригинальные имена
+                except Exception:
+                    pass
+
+            if date_col is None or value_col is None:
+                logger.error(f"Ошибка: Не удалось определить столбцы с датой и значением в {file_path}")
+                return None, "Ошибка: Один столбец должен содержать даты, а другой — числовые значения."
+
             return df, "Данные успешно прочитаны"
+
         except Exception as e:
             logger.error(f"Ошибка чтения {file_path}: {str(e)}")
             return None, f"Ошибка чтения файла: {str(e)}"
@@ -61,9 +103,8 @@ class TimeSeriesAnalyzer:
 
     def analyze_time_series(self, df: pd.DataFrame, image_path: Optional[str], main_metric: str, domain: str) -> Dict:
         """Анализирует временной ряд с учетом изображения, данных, метрики и домена."""
-        numeric_cols = df.select_dtypes(include=['number']).columns
-        if len(numeric_cols) == 0:
-            logger.error("Числовые столбцы в таблице данных не найдены")
+        if len(df.columns) != 2:
+            logger.error("Число столбцов в данных не равно двум")
             return {
                 "metric": main_metric,
                 "domain": domain,
@@ -75,31 +116,17 @@ class TimeSeriesAnalyzer:
                 "hypotheses": "Данные отсутствуют"
             }
 
-        date_col_name = df.columns[0]
-        numeric_cols = [col for col in numeric_cols if col != date_col_name]
-        if not numeric_cols:
-            logger.error("Числовые столбцы для значений не найдены (исключая колонку с датами)")
-            return {
-                "metric": main_metric,
-                "domain": domain,
-                "trend": "неизвестно",
-                "seasonality": "неизвестно",
-                "min_value": "неизвестно",
-                "max_value": "неизвестно",
-                "anomalies": [],
-                "hypotheses": "Числовые данные отсутствуют"
-            }
-        col = numeric_cols[0]
-        logger.info(f"Выбрана числовая колонка для значений: {col}")
+        date_col_name, value_col_name = df.columns[0], df.columns[1]
+        logger.info(f"Используемые столбцы: дата - {date_col_name}, значение - {value_col_name}")
 
         try:
             if pd.api.types.is_numeric_dtype(df[date_col_name]):
                 df[date_col_name] = pd.to_datetime(df[date_col_name].astype(int).astype(str) + '-01-01',
-                                                   errors='coerce')
+                                                  errors='coerce')
                 logger.info(f"Колонка {date_col_name} преобразована в datetime")
             elif df[date_col_name].dtype == 'object':
                 if df[date_col_name].str.match(r'Занлись \d+').any():
-                    df[date_col_name] = df[date_col_name].str.extract(r'Занлись (\д+)').astype(float).astype(int) + 1945
+                    df[date_col_name] = df[date_col_name].str.extract(r'Занлись (\d+)').astype(float).astype(int) + 1945
                     df[date_col_name] = pd.to_datetime(df[date_col_name].astype(str) + '-01-01')
                     logger.info(f"Колонка {date_col_name} преобразована из формата 'Занлись \d+' в datetime")
                 else:
@@ -131,7 +158,7 @@ class TimeSeriesAnalyzer:
         temp_df = pd.DataFrame({
             "Дата": [format_date_for_human(row[date_col_name]) if date_col is not None and pd.notna(
                 row[date_col_name]) else f"Запись {idx}" for idx, row in df.iterrows()],
-            "Значение": [round(float(row[col]), 2) if pd.notna(row[col]) else 0.0 for _, row in df.iterrows()]
+            "Значение": [round(float(row[value_col_name]), 2) if pd.notna(row[value_col_name]) else 0.0 for _, row in df.iterrows()]
         })
 
         min_value = temp_df["Значение"].min()
