@@ -105,8 +105,8 @@ def upload_image_callback(uploaded_image):
         st.session_state.run_triggered = False
         st.session_state.rerun_count = 0
         st.session_state.image_uploaded = True
-        if not st.session_state.get('has_initial_annotation', False):
-            st.session_state.has_initial_annotation = False
+        st.session_state.has_initial_annotation = False
+        st.session_state.processing = False
         logger.info(f"Изображение загружено: {uploaded_image.name}")
     except Exception as e:
         st.error(f"Ошибка: Загруженный файл не является изображением: {str(e)}")
@@ -121,8 +121,8 @@ def upload_data_callback(uploaded_data):
         st.session_state.run_triggered = False
         st.session_state.rerun_count = 0
         st.session_state.data_uploaded = True
-        if not st.session_state.get('has_initial_annotation', False):
-            st.session_state.has_initial_annotation = False
+        st.session_state.has_initial_annotation = False
+        st.session_state.processing = False
         logger.info(f"Данные загружены: {uploaded_data.name}")
     except Exception as e:
         st.error(f"Ошибка при загрузке данных: {str(e)}")
@@ -145,9 +145,9 @@ def display_image_callback(current_image):
                 st.session_state.run_triggered = False
                 st.session_state.rerun_count = 0
                 st.session_state.image_uploaded = False
-                if not st.session_state.get('has_initial_annotation', False):
-                    st.session_state.has_initial_annotation = False
+                st.session_state.has_initial_annotation = False
                 st.session_state.error_message = None
+                st.session_state.processing = False
                 logger.info("Изображение удалено пользователем")
                 st.rerun()
         else:
@@ -171,13 +171,13 @@ def display_data_callback(current_data):
                 st.session_state.run_triggered = False
                 st.session_state.rerun_count = 0
                 st.session_state.data_uploaded = False
-                if not st.session_state.get('has_initial_annotation', False):
-                    st.session_state.has_initial_annotation = False
+                st.session_state.has_initial_annotation = False
                 st.session_state.error_message = None
+                st.session_state.processing = False
                 logger.info("Данные удалены пользователем")
                 st.rerun()
         else:
-            st.info("Данные не загружены")
+            st.info("Данные не загружено")
     except Exception as e:
         logger.error(f"Ошибка в display_data_callback: {str(e)}")
 
@@ -209,70 +209,80 @@ def chat_callback(chat_container):
             st.session_state.data_uploaded = False
         if 'reset_uploaders' not in st.session_state:
             st.session_state.reset_uploaders = False
-        if 'needs_rerun' not in st.session_state:
-            st.session_state.needs_rerun = False
         if 'has_initial_annotation' not in st.session_state:
             st.session_state.has_initial_annotation = False
         if 'error_message' not in st.session_state:
             st.session_state.error_message = None
         if 'pending_user_input' not in st.session_state:
             st.session_state.pending_user_input = None
+        if 'processing' not in st.session_state:
+            st.session_state.processing = False
+        if 'pending_processing' not in st.session_state:
+            st.session_state.pending_processing = False
 
         current_image = get_current_file(UPLOAD_DIR)
         current_data = get_current_file(DATA_DIR)
-        logger.info(f"chat_callback: current_image={current_image}, current_data={current_data}, run_triggered={st.session_state.run_triggered}, rerun_count={st.session_state.rerun_count}, image_uploaded={st.session_state.image_uploaded}, data_uploaded={st.session_state.data_uploaded}, reset_uploaders={st.session_state.reset_uploaders}, needs_rerun={st.session_state.needs_rerun}, has_initial_annotation={st.session_state.has_initial_annotation}")
+        logger.info(f"chat_callback: current_image={current_image}, current_data={current_data}, run_triggered={st.session_state.run_triggered}, rerun_count={st.session_state.rerun_count}, image_uploaded={st.session_state.image_uploaded}, data_uploaded={st.session_state.data_uploaded}, processing={st.session_state.processing}, pending_processing={st.session_state.pending_processing}")
 
-        # Получаем пользовательский ввод только один раз
+        # Проверяем, есть ли отложенная обработка запроса
+        if st.session_state.pending_processing and st.session_state.pending_user_input:
+            user_input = st.session_state.pending_user_input
+            logger.info(f"Обработка отложенного запроса: {user_input}")
+            st.session_state.pending_processing = False
+            if st.session_state.has_initial_annotation or st.session_state.run_triggered:
+                st.session_state.chat_history.append({"role": "user", "content": user_input})
+                image_path = os.path.join(UPLOAD_DIR, current_image) if current_image else None
+                data_path = os.path.join(DATA_DIR, current_data) if current_data else None
+                state = AgentState(
+                    image_path=image_path,
+                    data_path=data_path,
+                    chat_history=st.session_state.chat_history,
+                    user_query=user_input,
+                    dash_features=None,
+                    domain_features=None,
+                    ts_features=None,
+                    final_annotation=None,
+                    response=None
+                )
+                result = asyncio.run(run_graph(state))
+                st.session_state.processing = False
+                logger.info(f"Сброшено processing=False после обработки запроса: {user_input}")
+                st.session_state.pending_user_input = None
+                if result["response"]:
+                    if "Слишком большой объем" in result["response"]:
+                        st.session_state.error_message = result["response"]
+                        logger.error(f"Ошибка в ответе: {result['response']}")
+                    else:
+                        st.session_state.chat_history.append(
+                            {"role": "assistant", "content": result["response"]}
+                        )
+                        logger.info(f"Сгенерирован ответ: {result['response']}")
+                st.session_state.rerun_count = 0
+                st.session_state.reset_uploaders = True
+                st.rerun()
+
+        # Поле ввода чата отключается во время обработки
         user_input = st.session_state.pending_user_input
         if not user_input:
-            user_input = st.chat_input("Задайте вопрос о дашборде...", key="chat_input_main")
+            user_input = st.chat_input("Задайте вопрос о дашборде...", key="chat_input_main", disabled=st.session_state.processing)
 
-        # Обрабатываем загрузку
+        # Обрабатываем загрузку файлов
         if (st.session_state.image_uploaded or st.session_state.data_uploaded) and user_input:
             st.session_state.pending_user_input = user_input
             logger.info(f"Сохранён пользовательский ввод перед перезапуском: {user_input}")
-            st.session_state.needs_rerun = True
             st.session_state.image_uploaded = False
             st.session_state.data_uploaded = False
             st.session_state.reset_uploaders = True
+            st.rerun()
 
-        # Если есть сохранённый ввод или новый ввод, обрабатываем его
-        if user_input:
-            if st.session_state.image_uploaded or st.session_state.data_uploaded:
-                # Ввод уже сохранён выше, ждём перезапуска
-                pass
-            else:
-                logger.info(f"Обработка пользовательского ввода: {user_input}")
-                if st.session_state.pending_user_input:
-                    st.session_state.pending_user_input = None
-                if st.session_state.has_initial_annotation or st.session_state.run_triggered:
-                    st.session_state.chat_history.append({"role": "user", "content": user_input})
-                    image_path = os.path.join(UPLOAD_DIR, current_image) if current_image else None
-                    data_path = os.path.join(DATA_DIR, current_data) if current_data else None
-                    state = AgentState(
-                        image_path=image_path,
-                        data_path=data_path,
-                        chat_history=st.session_state.chat_history,
-                        user_query=user_input,
-                        dash_features=None,
-                        domain_features=None,
-                        ts_features=None,
-                        final_annotation=None,
-                        response=None
-                    )
-                    result = asyncio.run(run_graph(state))
-                    if result["response"]:
-                        if "Слишком большой объем" in result["response"]:
-                            st.session_state.error_message = result["response"]
-                            logger.error(f"Ошибка в ответе: {result['response']}")
-                        else:
-                            st.session_state.chat_history.append(
-                                {"role": "assistant", "content": result["response"]}
-                            )
-                            logger.info(f"Сгенерирован ответ: {result['response']}")
-                    st.session_state.rerun_count = 0
-                    st.session_state.reset_uploaders = True
-                    st.session_state.needs_rerun = True
+        # Обрабатываем новый пользовательский ввод
+        if user_input and not (st.session_state.image_uploaded or st.session_state.data_uploaded) and not st.session_state.pending_processing:
+            logger.info(f"Обработка пользовательского ввода: {user_input}")
+            st.session_state.processing = True
+            st.session_state.pending_processing = True
+            st.session_state.pending_user_input = user_input
+            logger.info(f"Установлено processing=True и pending_processing=True для запроса: {user_input}")
+            st.rerun()
 
         # Синхронизируем last_image и last_data
         if current_image and current_image != st.session_state.last_image:
@@ -282,7 +292,7 @@ def chat_callback(chat_container):
             st.session_state.last_data = current_data
             logger.info(f"Синхронизировано last_data: {current_data}")
 
-        # Сбрасываем file_uploader'ы, если установлен флаг
+        # Сбрасываем file_uploader'ы
         if st.session_state.reset_uploaders:
             if "image_uploader" in st.session_state:
                 del st.session_state["image_uploader"]
@@ -292,13 +302,14 @@ def chat_callback(chat_container):
                 logger.info("Сброшен data_uploader")
             st.session_state.reset_uploaders = False
 
-        # Обрабатываем аннотацию только если нажата кнопка "Запустить"
+        # Обрабатываем аннотацию при нажатии кнопки "Запустить"
         if st.session_state.run_triggered:
             if not current_image or not current_data:
                 st.session_state.error_message = "Пожалуйста, загрузите изображение и данные перед запуском."
                 logger.info("Ошибка: отсутствует изображение или данные при попытке запуска")
                 st.session_state.run_triggered = False
-                st.session_state.needs_rerun = True
+                st.session_state.processing = False
+                st.rerun()
             elif st.session_state.rerun_count >= 3:
                 st.session_state.error_message = "Слишком много перезапусков. Пожалуйста, обновите страницу."
                 logger.error("Превышен лимит перезапусков")
@@ -307,7 +318,8 @@ def chat_callback(chat_container):
                 st.session_state.data_uploaded = False
                 st.session_state.has_initial_annotation = False
                 st.session_state.reset_uploaders = True
-                st.session_state.needs_rerun = True
+                st.session_state.processing = False
+                st.rerun()
             else:
                 st.session_state.error_message = None
                 st.session_state.rerun_count += 1
@@ -325,6 +337,7 @@ def chat_callback(chat_container):
                     response=None
                 )
                 result = asyncio.run(run_graph(state))
+                st.session_state.processing = False
                 if result["final_annotation"]:
                     if "Слишком большой объем" in result["final_annotation"]:
                         st.session_state.error_message = result["final_annotation"]
@@ -342,7 +355,7 @@ def chat_callback(chat_container):
                 st.session_state.last_data = current_data
                 st.session_state.rerun_count = 0
                 st.session_state.reset_uploaders = True
-                st.session_state.needs_rerun = True
+                st.rerun()
 
         # Отображаем чат
         with chat_container:
@@ -351,14 +364,9 @@ def chat_callback(chat_container):
                     st.markdown(message["content"])
             logger.info(f"Чат отображен, chat_history: {len(st.session_state.chat_history)} сообщений")
 
-        # Выполняем rerun, если нужно
-        if st.session_state.needs_rerun:
-            st.session_state.needs_rerun = False
-            logger.info("Выполняется st.rerun()")
-            st.rerun()
-
     except Exception as e:
         logger.error(f"Ошибка в chat_callback: {str(e)}")
+        st.session_state.processing = False
         with chat_container:
             for message in st.session_state.chat_history:
                 with st.chat_message(message["role"]):

@@ -31,10 +31,9 @@ def setup_interface(
             try:
                 upload_image_callback(uploaded_image)
                 st.session_state["image_uploaded"] = True
-                st.session_state["error_message"] = None  # Clear error message on successful upload
+                st.session_state["error_message"] = None
                 st.success("Изображение успешно загружено!")
                 logger.info("Обработана загрузка изображения")
-                # Сбрасываем file_uploader, чтобы избежать повторной загрузки
                 if "image_uploader" in st.session_state:
                     del st.session_state["image_uploader"]
             except Exception as e:
@@ -55,10 +54,9 @@ def setup_interface(
             try:
                 upload_data_callback(uploaded_data)
                 st.session_state["data_uploaded"] = True
-                st.session_state["error_message"] = None  # Clear error message on successful upload
+                st.session_state["error_message"] = None
                 st.success("Данные успешно загружены!")
                 logger.info("Обработана загрузка данных")
-                # Сбрасываем file_uploader, чтобы избежать повторной загрузки
                 if "data_uploader" in st.session_state:
                     del st.session_state["data_uploader"]
             except Exception as e:
@@ -70,13 +68,18 @@ def setup_interface(
     # Вторая колонка: кнопка запуска и чат
     with col2:
         st.header("Аннотация к временному ряду и чат")
-        if st.button("Запустить", key="run_button"):
+        # Блокируем кнопку, если идет обработка
+        is_processing = st.session_state.get("processing", False)
+        logger.info(f"Состояние кнопки 'Запустить': disabled={is_processing}")
+        if st.button("Запустить", key="run_button", disabled=is_processing):
             st.session_state["run_triggered"] = True
-            st.session_state.chat_history = []  # Clear chat history on Run button click
-            st.session_state["error_message"] = None  # Clear error message on Run button click
+            st.session_state["processing"] = True
+            st.session_state.chat_history = []
+            st.session_state["error_message"] = None
             logger.info("Кнопка 'Запустить' нажата, история чата очищена")
+            st.rerun()  # Перезапуск для немедленного обновления состояния кнопки
 
-        # Display error message if present, before chat_callback
+        # Отображаем сообщение об ошибке, если оно есть
         if "error_message" in st.session_state and st.session_state["error_message"]:
             st.error(st.session_state["error_message"])
 
