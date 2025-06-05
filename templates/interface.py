@@ -11,7 +11,7 @@ def setup_interface(
     get_current_data,
     clear_directory_callback
 ):
-    """Настраивает интерфейс с двумя колонками: дашборд и данные в одной, чат в другой."""
+    """Настраивает интерфейс с двумя колонками: дашборд и данные в одной, чат и кнопка запуска в другой."""
     logger.info("Начало настройки интерфейса")
     # Создаем две колонки
     col1, col2 = st.columns([3, 3])
@@ -58,9 +58,13 @@ def setup_interface(
         display_data_callback(get_current_data())
         logger.info("Вызван display_data_callback")
 
-    # Вторая колонка: чат
+    # Вторая колонка: кнопка запуска и чат
     with col2:
         st.header("Аннотация к временному ряду и чат")
+        if st.button("Запустить", key="run_button"):
+            st.session_state["run_triggered"] = True
+            st.session_state.chat_history = []  # Clear chat history on Run button click
+            logger.info("Кнопка 'Запустить' нажата, история чата очищена")
         chat_container = st.container()
         chat_callback(chat_container)
         logger.info("Вызван chat_callback")

@@ -103,7 +103,7 @@ def upload_image_callback(uploaded_image):
             return
         st.session_state.chat_history = []
         st.session_state.last_image = uploaded_image.name
-        st.session_state.annotation_triggered = True
+        st.session_state.run_triggered = False
         st.session_state.rerun_count = 0
         st.session_state.image_uploaded = True
         logger.info(f"Изображение загружено: {uploaded_image.name}")
@@ -118,7 +118,7 @@ def upload_data_callback(uploaded_data):
             f.write(uploaded_data.getbuffer())
         st.session_state.chat_history = []
         st.session_state.last_data = uploaded_data.name
-        st.session_state.annotation_triggered = True
+        st.session_state.run_triggered = False
         st.session_state.rerun_count = 0
         st.session_state.data_uploaded = True
         logger.info(f"Данные загружены: {uploaded_data.name}")
@@ -140,7 +140,7 @@ def display_image_callback(current_image):
                 clear_directory(UPLOAD_DIR)
                 st.session_state.chat_history = []
                 st.session_state.last_image = None
-                st.session_state.annotation_triggered = True
+                st.session_state.run_triggered = False
                 st.session_state.rerun_count = 0
                 st.session_state.image_uploaded = False
                 logger.info("Изображение удалено пользователем")
@@ -163,7 +163,7 @@ def display_data_callback(current_data):
                 clear_directory(DATA_DIR)
                 st.session_state.chat_history = []
                 st.session_state.last_data = None
-                st.session_state.annotation_triggered = True
+                st.session_state.run_triggered = False
                 st.session_state.rerun_count = 0
                 st.session_state.data_uploaded = False
                 logger.info("Данные удалены пользователем")
@@ -191,8 +191,8 @@ def chat_callback(chat_container):
             st.session_state.last_image = None
         if 'last_data' not in st.session_state:
             st.session_state.last_data = None
-        if 'annotation_triggered' not in st.session_state:
-            st.session_state.annotation_triggered = False
+        if 'run_triggered' not in st.session_state:
+            st.session_state.run_triggered = False
         if 'rerun_count' not in st.session_state:
             st.session_state.rerun_count = 0
         if 'image_uploaded' not in st.session_state:
@@ -203,14 +203,16 @@ def chat_callback(chat_container):
             st.session_state.reset_uploaders = False
         if 'needs_rerun' not in st.session_state:
             st.session_state.needs_rerun = False
+        if 'has_initial_annotation' not in st.session_state:
+            st.session_state.has_initial_annotation = False
 
         current_image = get_current_file(UPLOAD_DIR)
         current_data = get_current_file(DATA_DIR)
-        logger.info(f"chat_callback: current_image={current_image}, current_data={current_data}, annotation_triggered={st.session_state.annotation_triggered}, rerun_count={st.session_state.rerun_count}, image_uploaded={st.session_state.image_uploaded}, data_uploaded={st.session_state.data_uploaded}, reset_uploaders={st.session_state.reset_uploaders}, needs_rerun={st.session_state.needs_rerun}")
+        logger.info(f"chat_callback: current_image={current_image}, current_data={current_data}, run_triggered={st.session_state.run_triggered}, rerun_count={st.session_state.rerun_count}, image_uploaded={st.session_state.image_uploaded}, data_uploaded={st.session_state.data_uploaded}, reset_uploaders={st.session_state.reset_uploaders}, needs_rerun={st.session_state.needs_rerun}, has_initial_annotation={st.session_state.has_initial_annotation}")
 
         # Проверяем пользовательский ввод
         user_input = st.chat_input("Задайте вопрос о дашборде...", key="chat_input")
-        if user_input:
+        if user_input and (st.session_state.run_triggered or st.session_state.has_initial_annotation):
             logger.info(f"Получен пользовательский ввод: {user_input}")
             st.session_state.chat_history.append({"role": "user", "content": user_input})
             image_path = os.path.join(UPLOAD_DIR, current_image) if current_image else None
@@ -240,10 +242,13 @@ def chat_callback(chat_container):
             st.session_state.reset_uploaders = True
             st.session_state.needs_rerun = True
 
-        # Синхронизируем last_image
+        # Синхронизируем last_image и last_data
         if current_image and current_image != st.session_state.last_image:
             st.session_state.last_image = current_image
             logger.info(f"Синхронизировано last_image: {current_image}")
+        if current_data and current_data != st.session_state.last_data:
+            st.session_state.last_data = current_data
+            logger.info(f"Синхронизировано last_data: {current_data}")
 
         # Сбрасываем file_uploader'ы, если установлен флаг
         if st.session_state.reset_uploaders:
@@ -256,19 +261,15 @@ def chat_callback(chat_container):
             st.session_state.reset_uploaders = False
             st.session_state.needs_rerun = True
 
-        # Устанавливаем annotation_triggered для начальной генерации
-        if current_image and current_data and not st.session_state.chat_history and not st.session_state.annotation_triggered:
-            st.session_state.annotation_triggered = True
-            logger.info("Установлен annotation_triggered для начальной генерации аннотации")
-
-        # Обрабатываем аннотацию
-        if current_image and current_data and st.session_state.annotation_triggered:
+        # Обрабатываем аннотацию только если нажата кнопка "Запустить"
+        if st.session_state.run_triggered and current_image and current_data:
             if st.session_state.rerun_count >= 3:
                 st.error("Слишком много перезапусков. Пожалуйста, обновите страницу.")
                 logger.error("Превышен лимит перезапусков")
-                st.session_state.annotation_triggered = False
+                st.session_state.run_triggered = False
                 st.session_state.image_uploaded = False
                 st.session_state.data_uploaded = False
+                st.session_state.has_initial_annotation = False
                 st.session_state.reset_uploaders = True
                 st.session_state.needs_rerun = True
             else:
@@ -296,7 +297,8 @@ def chat_callback(chat_container):
                             {"role": "assistant", "content": result["final_annotation"]}
                         )
                         logger.info(f"Создана начальная аннотация: {result['final_annotation']}")
-                st.session_state.annotation_triggered = False
+                        st.session_state.has_initial_annotation = True
+                st.session_state.run_triggered = False
                 st.session_state.image_uploaded = False
                 st.session_state.data_uploaded = False
                 st.session_state.last_image = current_image
@@ -311,6 +313,7 @@ def chat_callback(chat_container):
             st.session_state.data_uploaded = False
             st.session_state.reset_uploaders = True
             st.session_state.needs_rerun = True
+            st.session_state.has_initial_annotation = False
 
         # Отображаем чат
         with chat_container:
@@ -325,12 +328,8 @@ def chat_callback(chat_container):
             logger.info("Выполняется st.rerun()")
             st.rerun()
 
-        # Отладочный вывод
-        # st.write(f"Debug: {st.session_state}")
-
     except Exception as e:
         logger.error(f"Ошибка в chat_callback: {str(e)}")
-        # Отображаем чат даже при ошибке
         with chat_container:
             for message in st.session_state.chat_history:
                 with st.chat_message(message["role"]):
