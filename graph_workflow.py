@@ -23,7 +23,7 @@ def create_graph():
     """Создает и настраивает граф задач для анализа дашборда и временного ряда."""
     dashboard_analyzer = DashboardAnalyzer()
     timeseries_analyzer = TimeSeriesAnalyzer()
-    domain_specific_analyzer = DomainSpecificAnalyzer(default_domain="finance")
+    domain_specific_analyzer = DomainSpecificAnalyzer()
     chat_agent = ChatAgent()
 
     graph = StateGraph(AgentState)

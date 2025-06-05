@@ -11,7 +11,7 @@ from timeseries_analyzer import TimeSeriesAnalyzer
 class ChatAgent:
     def __init__(self):
         self.dashboard_analyzer = DashboardAnalyzer()
-        self.domain_analyzer = DomainSpecificAnalyzer(default_domain="finance")
+        self.domain_analyzer = DomainSpecificAnalyzer()
         self.timeseries_analyzer = TimeSeriesAnalyzer()
 
     def generate_general_annotation(self, ts_features: Dict) -> str:

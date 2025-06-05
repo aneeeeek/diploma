@@ -7,6 +7,8 @@ from config import client, logger, llm
 from typing import Optional, Dict
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from PIL import Image
+import io
 
 
 class DomainSpecificAnalyzer:
@@ -14,33 +16,47 @@ class DomainSpecificAnalyzer:
         self.default_domain = default_domain
 
     def encode_image(self, image_path: str) -> str:
-        """Кодирует изображение в формат base64."""
+        """Кодирует изображение в формат base64 с предварительным сжатием."""
         try:
-            with open(image_path, "rb") as image_file:
-                encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
-                logger.info(f"Изображение {image_path} закодировано, длина: {len(encoded_string)}")
-                return encoded_string
+            # Открываем изображение
+            img = Image.open(image_path)
+            # Уменьшаем размер до 800x600
+            img.thumbnail((800, 600))
+            # Сохраняем в буфер с сжатием JPEG
+            buffer = io.BytesIO()
+            img.save(buffer, format="JPEG", quality=50)  # Сжатие с качеством 50
+            encoded_string = base64.b64encode(buffer.getvalue()).decode("utf-8")
+            logger.info(f"Изображение {image_path} закодировано, длина: {len(encoded_string)}")
+            return encoded_string
         except Exception as e:
             logger.error(f"Ошибка при кодировании изображения {image_path}: {str(e)}")
             return f"Ошибка: Не удалось закодировать изображение: {str(e)}"
 
-    def encode_data(self, data_path: Path) -> str:
-        """Читает данные и кодирует их в CSV в формате base64."""
+    def encode_data(self, data_path: str) -> str:
+        """Кодирует данные в CSV в формате base64, ограничивая до 50 строк."""
         try:
-            if data_path.suffix == '.csv':
-                df = pd.read_csv(data_path)
-            elif data_path.suffix in ['.xlsx', '.xls']:
-                df = pd.read_excel(data_path, engine='openpyxl')
+            if data_path.endswith('.csv'):
+                df = pd.read_csv(data_path, nrows=50)  # Ограничиваем до 50 строк
+                logger.info(f"Прочитано {len(df)} строк из CSV файла {data_path}")
+            elif data_path.endswith('.xlsx'):
+                df = pd.read_excel(data_path, nrows=50)  # Ограничиваем до 50 строк
+                logger.info(f"Прочитано {len(df)} строк из Excel файла {data_path}")
             else:
-                logger.error(f"Неподдерживаемый формат файла: {data_path.suffix}")
-                return f"Ошибка: Неподдерживаемый формат файла: {data_path.suffix}"
+                logger.error(f"Неподдерживаемый формат файла: {data_path}")
+                return ""
+            # Ограничиваем до двух столбцов (дата и первое числовое значение)
+            numeric_cols = df.select_dtypes(include=['number']).columns
+            if len(numeric_cols) > 0:
+                df = df[[df.columns[0], numeric_cols[0]]]  # Дата и первый числовой столбец
+            else:
+                df = df.iloc[:, :2]  # Первые два столбца, если числовых нет
             csv_buffer = df.to_csv(index=False)
             encoded_csv = base64.b64encode(csv_buffer.encode("utf-8")).decode("utf-8")
             logger.info(f"Данные {data_path} закодированы, длина: {len(encoded_csv)}")
             return encoded_csv
         except Exception as e:
             logger.error(f"Ошибка при кодировании данных {data_path}: {str(e)}")
-            return f"Ошибка: Не удалось закодировать данные: {str(e)}"
+            return ""
 
     def extract_text_from_response(self, content: str) -> str:
         """Извлекает домен из ответа LLM, удаляя markdown, если он есть."""
@@ -63,10 +79,12 @@ class DomainSpecificAnalyzer:
     def suggest_domain(self, image_path: Optional[str], data_path: Optional[str]) -> Dict:
         """Определяет область дашборда на основе изображения и данных, возвращая JSON."""
         base64_image = self.encode_image(image_path) if image_path else ""
-        base64_data = self.encode_data(Path(data_path)) if data_path else ""
+        base64_data = self.encode_data(data_path) if data_path else ""
         if not base64_image and not base64_data:
             logger.warning("Отсутствуют данные и изображение, возвращается default_domain")
             return {"domain": self.default_domain}
+
+        logger.info(f"Размер base64_image: {len(base64_image)} байт, base64_data: {len(base64_data)} байт")
         prompt = f"""Ты аналитик данных. На основе изображения дашборда и данных временного ряда определи область применения дашборда.
         Извлеки контекст из полученных данных, а именно область применения дашборда (например, финансы, экономика, криптовалюта, медицина, политика, компьютерные вычисления и прочее, что можешь распознать).
         Изображение в base64: {base64_image if base64_image else 'отсутствует'}
@@ -75,7 +93,6 @@ class DomainSpecificAnalyzer:
         Ответ должен быть заключен в ```json ```.
         Инструкция: Декодируй base64, проанализируй данные и изображение, выбери наиболее подходящую область.
         """
-        logger.info(f"Длина промпта: {len(prompt)} символов")
         try:
             response = client.chat.completions.create(
                 model="aimediator.gpt-4.1-mini",
@@ -86,15 +103,13 @@ class DomainSpecificAnalyzer:
                             {"type": "text", "text": prompt},
                             {
                                 "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{base64_image}"
-                                }
+                                "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
                             } if base64_image and not base64_image.startswith("Ошибка") else {"type": "text",
                                                                                               "text": "Изображение отсутствует"}
                         ]
                     }
                 ],
-                max_tokens=100,
+                max_tokens=500,  # Уменьшено для оптимизации
                 temperature=0.5,
                 stream=False
             )
